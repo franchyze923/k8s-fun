@@ -58,6 +58,10 @@ cd ..
 # Get master IP from inventory
 MASTER_IP=$(grep 'ansible_host=' ansible/inventory.ini | head -1 | sed 's/.*ansible_host=//')
 
+# Get LoadBalancer IP for demo app
+export KUBECONFIG=$(pwd)/kubeconfig
+DEMO_LB_IP=$(kubectl -n demo get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+
 echo ""
 echo "=== Deployment complete ==="
 echo ""
@@ -65,7 +69,7 @@ echo "To access the cluster:"
 echo "  export KUBECONFIG=$(pwd)/kubeconfig"
 echo ""
 echo "Dashboard:  https://${MASTER_IP}:30443"
-echo "Demo App:   http://${MASTER_IP}:30080"
+echo "Demo App:   http://${DEMO_LB_IP}"
 echo "S3 Endpoint: See s3-credentials.txt"
 echo ""
 echo "Dashboard token: $(pwd)/dashboard-token.txt"
