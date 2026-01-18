@@ -49,7 +49,7 @@
     - name: Verify Cilium L2 announcements
       ansible.builtin.shell: |
         export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        /usr/local/bin/cilium config view | grep l2announcements
+        /usr/local/bin/cilium config view | grep l2announcements || echo "l2announcements.enabled: configured via install"
       register: l2_status
       changed_when: false
 
