@@ -1,0 +1,144 @@
+---
+# Second Demo App - demonstrates multiple LoadBalancer IPs
+
+- name: Deploy Second Demo App
+  hosts: master
+  tasks:
+    - name: Create demo2 namespace
+      ansible.builtin.command: /usr/local/bin/k3s kubectl create namespace demo2 --dry-run=client -o yaml
+      register: ns_yaml
+      changed_when: false
+
+    - name: Apply demo2 namespace
+      ansible.builtin.shell: |
+        echo '{{ ns_yaml.stdout }}' | /usr/local/bin/k3s kubectl apply -f -
+      changed_when: true
+
+    - name: Create second demo app manifests
+      ansible.builtin.copy:
+        dest: /tmp/demo-app-2.yaml
+        mode: '0644'
+        content: |
+          ---
+          # ConfigMap with custom index.html
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: nginx-content
+            namespace: demo2
+          data:
+            index.html: |
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <title>K8s Demo App 2</title>
+                <style>
+                  body { font-family: Arial, sans-serif; margin: 40px; background: #2d1b4e; color: #eee; }
+                  .container { max-width: 800px; margin: 0 auto; }
+                  h1 { color: #ff6b6b; }
+                  .info { background: #1a1033; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                  .success { color: #ffd93d; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <h1>Kubernetes Demo App 2</h1>
+                  <div class="info">
+                    <h2 class="success">Second LoadBalancer IP Working!</h2>
+                    <p>This app demonstrates that Cilium L2 LoadBalancer can assign multiple IPs from the pool.</p>
+                    <ul>
+                      <li><strong>App 1:</strong> First LoadBalancer IP (192.168.40.200)</li>
+                      <li><strong>App 2:</strong> Second LoadBalancer IP (this one)</li>
+                    </ul>
+                  </div>
+                  <div class="info">
+                    <p>IP Pool: 192.168.40.200 - 192.168.40.220</p>
+                    <p>Each LoadBalancer service gets a unique IP from this pool.</p>
+                  </div>
+                </div>
+              </body>
+              </html>
+          ---
+          # Deployment
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+            namespace: demo2
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                - name: nginx
+                  image: nginx:alpine
+                  ports:
+                  - containerPort: 80
+                  volumeMounts:
+                  - name: content
+                    mountPath: /usr/share/nginx/html
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "100m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "200m"
+                volumes:
+                - name: content
+                  configMap:
+                    name: nginx-content
+          ---
+          # Service with LoadBalancer
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx
+            namespace: demo2
+          spec:
+            type: LoadBalancer
+            selector:
+              app: nginx
+            ports:
+            - port: 80
+              targetPort: 80
+
+    - name: Deploy second demo app
+      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/demo-app-2.yaml
+      changed_when: true
+
+    - name: Wait for deployment to be ready
+      ansible.builtin.command: >
+        /usr/local/bin/k3s kubectl -n demo2 wait --for=condition=Available deployment/nginx --timeout=120s
+      changed_when: false
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+
+    - name: Get LoadBalancer IP
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl -n demo2 get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: lb_ip
+      changed_when: false
+      retries: 6
+      delay: 5
+      until: lb_ip.stdout != ""
+
+    - name: Display access instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Demo App 2 deployed!"
+          - "=========================================="
+          - ""
+          - "Access the app at:"
+          - "  http://{{ lb_ip.stdout }}"
+          - ""
+          - "=========================================="
