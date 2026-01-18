@@ -1,0 +1,109 @@
+---
+# k3s Cluster Installation Playbook
+
+- name: Prepare all nodes
+  hosts: k3s_cluster
+  tasks:
+    - name: Disable firewalld
+      ansible.builtin.systemd:
+        name: firewalld
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Wait for cloud-init to complete
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      timeout: 300
+
+- name: Install k3s server on master
+  hosts: master
+  tasks:
+    - name: Check if k3s is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Install k3s server (without flannel for Cilium)
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | sh -s - server \
+          --disable=traefik \
+          --flannel-backend=none \
+          --disable-network-policy \
+          --write-kubeconfig-mode=644
+      args:
+        creates: /usr/local/bin/k3s
+      when: not k3s_binary.stat.exists
+
+    - name: Wait for k3s API to be ready
+      ansible.builtin.command: /usr/local/bin/k3s kubectl get nodes
+      changed_when: false
+      retries: 10
+      delay: 5
+      register: result
+      until: result.rc == 0
+
+    - name: Get k3s token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+
+    - name: Set token fact
+      ansible.builtin.set_fact:
+        k3s_token: "{{ k3s_token.content | b64decode | trim }}"
+
+    - name: Get master IP
+      ansible.builtin.set_fact:
+        k3s_master_ip: "{{ ansible_host }}"
+
+- name: Install k3s agents on workers
+  hosts: workers
+  tasks:
+    - name: Check if k3s-agent is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Install k3s agent
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | K3S_URL="https://{{ hostvars[groups['master'][0]]['k3s_master_ip'] }}:6443" \
+          K3S_TOKEN="{{ hostvars[groups['master'][0]]['k3s_token'] }}" \
+          sh -s - agent
+      args:
+        creates: /usr/local/bin/k3s
+      when: not k3s_binary.stat.exists
+
+- name: Verify cluster and fetch kubeconfig
+  hosts: master
+  tasks:
+    - name: Wait for all nodes to register (not Ready yet - needs CNI)
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl get nodes --no-headers | wc -l
+      register: node_count
+      until: node_count.stdout | int >= 3
+      retries: 20
+      delay: 10
+      changed_when: false
+
+    - name: Get cluster nodes
+      ansible.builtin.command: /usr/local/bin/k3s kubectl get nodes -o wide
+      changed_when: false
+      register: nodes_output
+
+    - name: Display cluster nodes
+      ansible.builtin.debug:
+        msg: "{{ nodes_output.stdout_lines }}"
+
+    - name: Fetch kubeconfig
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: ../kubeconfig
+        flat: true
+
+    - name: Update kubeconfig with master IP
+      ansible.builtin.replace:
+        path: ../kubeconfig
+        regexp: '127\.0\.0\.1'
+        replace: "{{ ansible_host }}"
+      delegate_to: localhost
+      become: false

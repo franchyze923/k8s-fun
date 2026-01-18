@@ -1,0 +1,167 @@
+---
+# Rook-Ceph Object Storage (S3) Installation Playbook
+
+- name: Deploy Ceph Object Storage (S3)
+  hosts: master
+  tasks:
+    - name: Create CephObjectStore
+      ansible.builtin.copy:
+        dest: /tmp/ceph-objectstore.yaml
+        mode: '0644'
+        content: |
+          apiVersion: ceph.rook.io/v1
+          kind: CephObjectStore
+          metadata:
+            name: my-store
+            namespace: rook-ceph
+          spec:
+            metadataPool:
+              failureDomain: host
+              replicated:
+                size: 3
+            dataPool:
+              failureDomain: host
+              replicated:
+                size: 3
+            preservePoolsOnDelete: false
+            gateway:
+              port: 80
+              instances: 1
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "512Mi"
+                limits:
+                  cpu: "1"
+                  memory: "1Gi"
+
+    - name: Deploy CephObjectStore
+      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-objectstore.yaml
+      changed_when: true
+
+    - name: Wait for RGW pod to be ready
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl -n rook-ceph get pods -l app=rook-ceph-rgw --no-headers 2>/dev/null | grep -c "Running" || echo "0"
+      register: rgw_count
+      until: rgw_count.stdout | int >= 1
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Create S3 user
+      ansible.builtin.copy:
+        dest: /tmp/ceph-s3-user.yaml
+        mode: '0644'
+        content: |
+          apiVersion: ceph.rook.io/v1
+          kind: CephObjectStoreUser
+          metadata:
+            name: s3-user
+            namespace: rook-ceph
+          spec:
+            store: my-store
+            displayName: "S3 User"
+
+    - name: Deploy S3 user
+      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-s3-user.yaml
+      changed_when: true
+
+    - name: Wait for S3 user secret to be created
+      ansible.builtin.command: /usr/local/bin/k3s kubectl -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user
+      retries: 12
+      delay: 5
+      register: result
+      until: result.rc == 0
+      changed_when: false
+
+    - name: Get S3 access key
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user -o jsonpath='{.data.AccessKey}' | base64 -d
+      register: s3_access_key
+      changed_when: false
+
+    - name: Get S3 secret key
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user -o jsonpath='{.data.SecretKey}' | base64 -d
+      register: s3_secret_key
+      changed_when: false
+
+    - name: Create NodePort service for S3 (separate from operator-managed service)
+      ansible.builtin.copy:
+        dest: /tmp/ceph-s3-nodeport.yaml
+        mode: '0644'
+        content: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: rgw-external
+            namespace: rook-ceph
+          spec:
+            type: NodePort
+            selector:
+              app: rook-ceph-rgw
+              ceph_daemon_id: my-store
+              rgw: my-store
+              rook_cluster: rook-ceph
+              rook_object_store: my-store
+            ports:
+            - port: 80
+              targetPort: 8080
+              nodePort: 30880
+              name: http
+
+    - name: Deploy S3 NodePort service
+      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-s3-nodeport.yaml
+      changed_when: true
+
+    - name: Get S3 NodePort
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl -n rook-ceph get svc rgw-external -o jsonpath='{.spec.ports[0].nodePort}'
+      register: s3_nodeport
+      changed_when: false
+
+    - name: Save S3 credentials to local file
+      ansible.builtin.copy:
+        content: |
+          # Rook-Ceph S3 Credentials
+          S3_ENDPOINT=http://{{ ansible_host }}:{{ s3_nodeport.stdout }}
+          S3_ACCESS_KEY={{ s3_access_key.stdout }}
+          S3_SECRET_KEY={{ s3_secret_key.stdout }}
+
+          # AWS CLI configuration:
+          # aws configure set aws_access_key_id {{ s3_access_key.stdout }}
+          # aws configure set aws_secret_access_key {{ s3_secret_key.stdout }}
+          # aws --endpoint-url http://{{ ansible_host }}:{{ s3_nodeport.stdout }} s3 mb s3://my-bucket
+          # aws --endpoint-url http://{{ ansible_host }}:{{ s3_nodeport.stdout }} s3 ls
+        dest: ../s3-credentials.txt
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Get RGW pods
+      ansible.builtin.command: /usr/local/bin/k3s kubectl -n rook-ceph get pods -l app=rook-ceph-rgw
+      register: rgw_pods
+      changed_when: false
+
+    - name: Display RGW pods
+      ansible.builtin.debug:
+        msg: "{{ rgw_pods.stdout_lines }}"
+
+    - name: Display S3 access instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Ceph S3 Object Storage deployed!"
+          - "=========================================="
+          - ""
+          - "S3 Endpoint: http://{{ ansible_host }}:{{ s3_nodeport.stdout }}"
+          - ""
+          - "Credentials saved to: s3-credentials.txt"
+          - ""
+          - "Test with AWS CLI:"
+          - "  export AWS_ACCESS_KEY_ID={{ s3_access_key.stdout }}"
+          - "  export AWS_SECRET_ACCESS_KEY={{ s3_secret_key.stdout }}"
+          - "  aws --endpoint-url http://{{ ansible_host }}:{{ s3_nodeport.stdout }} s3 mb s3://test-bucket"
+          - "  aws --endpoint-url http://{{ ansible_host }}:{{ s3_nodeport.stdout }} s3 ls"
+          - ""
+          - "=========================================="

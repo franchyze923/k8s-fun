@@ -1,0 +1,72 @@
+---
+# Cilium CNI Installation Playbook
+
+- name: Deploy Cilium CNI
+  hosts: master
+  tasks:
+    - name: Install Cilium CLI
+      ansible.builtin.shell: |
+        CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+        CLI_ARCH=amd64
+        curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
+        tar xzvf cilium-linux-${CLI_ARCH}.tar.gz -C /usr/local/bin
+        rm cilium-linux-${CLI_ARCH}.tar.gz
+      args:
+        creates: /usr/local/bin/cilium
+
+    - name: Get API server endpoint
+      ansible.builtin.set_fact:
+        k8s_api_endpoint: "https://{{ ansible_host }}:6443"
+
+    - name: Install Cilium with k3s-compatible settings and L2 announcements
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        /usr/local/bin/cilium install --version 1.16.0 \
+          --set k8sServiceHost={{ ansible_host }} \
+          --set k8sServicePort=6443 \
+          --set operator.replicas=1 \
+          --set l2announcements.enabled=true \
+          --set externalIPs.enabled=true \
+          --set k8sClientRateLimit.qps=50 \
+          --set k8sClientRateLimit.burst=100
+      register: cilium_install
+      changed_when: "'Cilium was successfully installed' in cilium_install.stdout"
+      failed_when: cilium_install.rc != 0 and 'already installed' not in cilium_install.stderr
+
+    - name: Wait for Cilium to be ready
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        /usr/local/bin/cilium status --wait
+      retries: 5
+      delay: 30
+      register: result
+      until: result.rc == 0
+      changed_when: false
+
+    - name: Wait for all nodes to be Ready
+      ansible.builtin.command: /usr/local/bin/k3s kubectl wait --for=condition=Ready node --all --timeout=300s
+      changed_when: false
+      retries: 5
+      delay: 15
+      register: result
+      until: result.rc == 0
+
+    - name: Get Cilium status
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        /usr/local/bin/cilium status
+      register: cilium_status
+      changed_when: false
+
+    - name: Display Cilium status
+      ansible.builtin.debug:
+        msg: "{{ cilium_status.stdout_lines }}"
+
+    - name: Get cluster nodes
+      ansible.builtin.command: /usr/local/bin/k3s kubectl get nodes -o wide
+      changed_when: false
+      register: nodes_output
+
+    - name: Display cluster nodes
+      ansible.builtin.debug:
+        msg: "{{ nodes_output.stdout_lines }}"

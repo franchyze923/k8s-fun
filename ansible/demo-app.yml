@@ -1,0 +1,193 @@
+---
+# Demo Nginx App - demonstrates k8s, storage, and networking
+
+- name: Deploy Demo Nginx App
+  hosts: master
+  tasks:
+    - name: Create demo namespace
+      ansible.builtin.command: /usr/local/bin/k3s kubectl create namespace demo --dry-run=client -o yaml
+      register: ns_yaml
+      changed_when: false
+
+    - name: Apply demo namespace
+      ansible.builtin.shell: |
+        echo '{{ ns_yaml.stdout }}' | /usr/local/bin/k3s kubectl apply -f -
+      changed_when: true
+
+    - name: Create demo app manifests
+      ansible.builtin.copy:
+        dest: /tmp/demo-app.yaml
+        mode: '0644'
+        content: |
+          ---
+          # PVC using Rook-Ceph storage
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nginx-pvc
+            namespace: demo
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: rook-ceph-block
+            resources:
+              requests:
+                storage: 1Gi
+          ---
+          # ConfigMap with custom index.html
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: nginx-content
+            namespace: demo
+          data:
+            index.html: |
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <title>K8s Demo App</title>
+                <style>
+                  body { font-family: Arial, sans-serif; margin: 40px; background: #1a1a2e; color: #eee; }
+                  .container { max-width: 800px; margin: 0 auto; }
+                  h1 { color: #00d4ff; }
+                  .info { background: #16213e; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                  .success { color: #00ff88; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <h1>Kubernetes Demo App</h1>
+                  <div class="info">
+                    <h2 class="success">Everything is working!</h2>
+                    <ul>
+                      <li><strong>k3s:</strong> Kubernetes cluster running</li>
+                      <li><strong>Cilium:</strong> CNI networking active</li>
+                      <li><strong>Rook-Ceph:</strong> Persistent storage attached</li>
+                      <li><strong>NodePort:</strong> External access configured</li>
+                    </ul>
+                  </div>
+                  <div class="info">
+                    <p>Hostname: <strong id="hostname"></strong></p>
+                    <p>Served from pod with persistent storage</p>
+                  </div>
+                </div>
+                <script>
+                  fetch('/etc/hostname').catch(() => {
+                    document.getElementById('hostname').textContent = window.location.hostname;
+                  });
+                </script>
+              </body>
+              </html>
+          ---
+          # Deployment
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+            namespace: demo
+          spec:
+            replicas: 1  # Single replica for RWO storage
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                - name: nginx
+                  image: nginx:alpine
+                  ports:
+                  - containerPort: 80
+                  volumeMounts:
+                  - name: content
+                    mountPath: /usr/share/nginx/html
+                  - name: data
+                    mountPath: /data
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "100m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "200m"
+                volumes:
+                - name: content
+                  configMap:
+                    name: nginx-content
+                - name: data
+                  persistentVolumeClaim:
+                    claimName: nginx-pvc
+          ---
+          # Service with LoadBalancer (uses Cilium L2 announcements)
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx
+            namespace: demo
+          spec:
+            type: LoadBalancer
+            selector:
+              app: nginx
+            ports:
+            - port: 80
+              targetPort: 80
+
+    - name: Deploy demo app
+      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/demo-app.yaml
+      changed_when: true
+
+    - name: Wait for PVC to bind
+      ansible.builtin.command: >
+        /usr/local/bin/k3s kubectl -n demo wait --for=jsonpath='{.status.phase}'=Bound pvc/nginx-pvc --timeout=120s
+      changed_when: false
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+
+    - name: Wait for deployment to be ready
+      ansible.builtin.command: >
+        /usr/local/bin/k3s kubectl -n demo wait --for=condition=Available deployment/nginx --timeout=120s
+      changed_when: false
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+
+    - name: Get demo app status
+      ansible.builtin.shell: |
+        echo "=== Pods ===" && \
+        /usr/local/bin/k3s kubectl -n demo get pods -o wide && \
+        echo "" && echo "=== PVC ===" && \
+        /usr/local/bin/k3s kubectl -n demo get pvc && \
+        echo "" && echo "=== Service ===" && \
+        /usr/local/bin/k3s kubectl -n demo get svc
+      register: demo_status
+      changed_when: false
+
+    - name: Display demo app status
+      ansible.builtin.debug:
+        msg: "{{ demo_status.stdout_lines }}"
+
+    - name: Get LoadBalancer IP
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl -n demo get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: lb_ip
+      changed_when: false
+      retries: 6
+      delay: 5
+      until: lb_ip.stdout != ""
+
+    - name: Display access instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Demo App deployed!"
+          - "=========================================="
+          - ""
+          - "Access the app at:"
+          - "  http://{{ lb_ip.stdout }}"
+          - ""
+          - "=========================================="

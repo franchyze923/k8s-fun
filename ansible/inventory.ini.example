@@ -1,0 +1,13 @@
+# Example inventory - update IPs from terraform output
+# Copy to inventory.ini and update with actual IPs
+
+[master]
+k8s-master ansible_host=192.168.40.XX
+
+[workers]
+k8s-worker-1 ansible_host=192.168.40.XX
+k8s-worker-2 ansible_host=192.168.40.XX
+
+[k3s_cluster:children]
+master
+workers

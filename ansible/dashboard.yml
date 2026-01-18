@@ -1,0 +1,103 @@
+---
+# Kubernetes Dashboard Installation Playbook
+
+- name: Deploy Kubernetes Dashboard
+  hosts: master
+  tasks:
+    - name: Deploy Kubernetes Dashboard
+      ansible.builtin.command: >
+        /usr/local/bin/k3s kubectl apply -f
+        https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+      changed_when: true
+
+    - name: Create admin user service account
+      ansible.builtin.copy:
+        dest: /tmp/dashboard-admin.yaml
+        mode: '0644'
+        content: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: admin-user
+            namespace: kubernetes-dashboard
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: admin-user
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+          - kind: ServiceAccount
+            name: admin-user
+            namespace: kubernetes-dashboard
+
+    - name: Apply admin user config
+      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/dashboard-admin.yaml
+      changed_when: true
+
+    - name: Create long-lived token for admin user
+      ansible.builtin.copy:
+        dest: /tmp/dashboard-token.yaml
+        mode: '0644'
+        content: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: admin-user-token
+            namespace: kubernetes-dashboard
+            annotations:
+              kubernetes.io/service-account.name: admin-user
+          type: kubernetes.io/service-account-token
+
+    - name: Apply token secret
+      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/dashboard-token.yaml
+      changed_when: true
+
+    - name: Wait for dashboard to be ready
+      ansible.builtin.command: >
+        /usr/local/bin/k3s kubectl -n kubernetes-dashboard wait
+        --for=condition=Ready pod -l k8s-app=kubernetes-dashboard
+        --timeout=120s
+      changed_when: false
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+
+    - name: Patch dashboard service to NodePort
+      ansible.builtin.command: >
+        /usr/local/bin/k3s kubectl -n kubernetes-dashboard patch svc kubernetes-dashboard
+        --type='json' -p '[{"op": "replace", "path": "/spec/type", "value": "NodePort"},
+        {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30443}]'
+      changed_when: true
+
+    - name: Get dashboard token
+      ansible.builtin.shell: |
+        /usr/local/bin/k3s kubectl -n kubernetes-dashboard get secret admin-user-token -o jsonpath='{.data.token}' | base64 -d
+      register: dashboard_token
+      changed_when: false
+
+    - name: Save token to local file
+      ansible.builtin.copy:
+        content: "{{ dashboard_token.stdout }}"
+        dest: ../dashboard-token.txt
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Display access instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Kubernetes Dashboard installed!"
+          - "=========================================="
+          - ""
+          - "Access the dashboard at:"
+          - "  https://{{ ansible_host }}:30443"
+          - ""
+          - "Login with token from: dashboard-token.txt"
+          - ""
+          - "=========================================="
