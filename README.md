@@ -8,6 +8,7 @@ Automated deployment of a k3s Kubernetes cluster on Proxmox VMs using Terraform 
 - **Cilium CNI** with L2 LoadBalancer support
 - **Rook-Ceph storage** (block storage + S3-compatible object storage)
 - **Kubernetes Dashboard**
+- **Code-Server** (VS Code in browser)
 - **Two demo nginx apps** with separate LoadBalancer IPs
 
 ## Prerequisites
@@ -57,15 +58,17 @@ This takes about 15-20 minutes and will:
 5. Install Kubernetes Dashboard
 6. Deploy demo apps (2 apps with LoadBalancer IPs)
 7. Deploy S3 object storage
+8. Deploy Code-Server (VS Code in browser)
 
 ### 4. Access your cluster
 
 After deployment, you'll see output like:
 ```
-Dashboard:   https://192.168.40.14:30443
-Demo App 1:  http://192.168.40.200
-Demo App 2:  http://192.168.40.201
-S3 Endpoint: See s3-credentials.txt
+Dashboard:    https://192.168.40.14:30443
+Demo App 1:   http://192.168.40.200
+Demo App 2:   http://192.168.40.201
+Code-Server:  http://192.168.40.202:8443  (password: changeme)
+S3 Endpoint:  See s3-credentials.txt
 ```
 
 Use the kubeconfig:
@@ -101,7 +104,8 @@ This removes all VMs and cleans up generated files.
     ├── dashboard.yml         # Kubernetes Dashboard
     ├── demo-app.yml          # Demo nginx app 1
     ├── demo-app-2.yml        # Demo nginx app 2
-    └── ceph-s3.yml           # S3 object storage
+    ├── ceph-s3.yml           # S3 object storage
+    └── code-server.yml       # VS Code in browser
 ```
 
 ## Configuration Options

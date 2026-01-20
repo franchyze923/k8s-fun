@@ -56,15 +56,19 @@ ansible-playbook demo-app-2.yml
 echo "Deploying Ceph S3 Object Storage..."
 ansible-playbook ceph-s3.yml
 
+echo "Deploying Code-Server (VS Code in browser)..."
+ansible-playbook code-server.yml
+
 cd ..
 
 # Get master IP from inventory
 MASTER_IP=$(grep 'ansible_host=' ansible/inventory.ini | head -1 | sed 's/.*ansible_host=//')
 
-# Get LoadBalancer IPs for demo apps
+# Get LoadBalancer IPs for apps
 export KUBECONFIG=$(pwd)/kubeconfig
 DEMO_LB_IP=$(kubectl -n demo get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 DEMO2_LB_IP=$(kubectl -n demo2 get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+CODE_SERVER_IP=$(kubectl -n code-server get svc code-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 
 echo ""
 echo "=== Deployment complete ==="
@@ -72,10 +76,11 @@ echo ""
 echo "To access the cluster:"
 echo "  export KUBECONFIG=$(pwd)/kubeconfig"
 echo ""
-echo "Dashboard:   https://${MASTER_IP}:30443"
-echo "Demo App 1:  http://${DEMO_LB_IP}"
-echo "Demo App 2:  http://${DEMO2_LB_IP}"
-echo "S3 Endpoint: See s3-credentials.txt"
+echo "Dashboard:    https://${MASTER_IP}:30443"
+echo "Demo App 1:   http://${DEMO_LB_IP}"
+echo "Demo App 2:   http://${DEMO2_LB_IP}"
+echo "Code-Server:  http://${CODE_SERVER_IP}:8443  (password: changeme)"
+echo "S3 Endpoint:  See s3-credentials.txt"
 echo ""
 echo "Dashboard token: $(pwd)/dashboard-token.txt"
 echo "S3 credentials:  $(pwd)/s3-credentials.txt"
