@@ -1,0 +1,50 @@
+---
+# CephObjectStore for S3
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStore
+metadata:
+  name: my-store
+  namespace: rook-ceph
+spec:
+  metadataPool:
+    failureDomain: host
+    replicated:
+      size: 2
+  dataPool:
+    failureDomain: host
+    replicated:
+      size: 2
+  preservePoolsOnDelete: false
+  gateway:
+    port: 8080
+    instances: 1
+---
+# S3 User
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStoreUser
+metadata:
+  name: s3-user
+  namespace: rook-ceph
+spec:
+  store: my-store
+  displayName: "S3 User"
+---
+# NodePort Service for external S3 access
+apiVersion: v1
+kind: Service
+metadata:
+  name: rgw-external
+  namespace: rook-ceph
+spec:
+  type: NodePort
+  selector:
+    app: rook-ceph-rgw
+    ceph_daemon_id: my-store
+    rgw: my-store
+    rook_cluster: rook-ceph
+    rook_object_store: my-store
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30880
+    name: http

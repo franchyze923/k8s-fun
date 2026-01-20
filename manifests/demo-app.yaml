@@ -1,0 +1,118 @@
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+# PVC using Rook-Ceph storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nginx-pvc
+  namespace: demo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: rook-ceph-block
+  resources:
+    requests:
+      storage: 1Gi
+---
+# ConfigMap with custom index.html
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-content
+  namespace: demo
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>K8s Demo App</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #1a1a2e; color: #eee; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { color: #00d4ff; }
+        .info { background: #16213e; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .success { color: #00ff88; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>Kubernetes Demo App</h1>
+        <div class="info">
+          <h2 class="success">Everything is working!</h2>
+          <ul>
+            <li><strong>k3s:</strong> Kubernetes cluster running</li>
+            <li><strong>Cilium:</strong> CNI networking active</li>
+            <li><strong>Rook-Ceph:</strong> Persistent storage attached</li>
+            <li><strong>LoadBalancer:</strong> External access configured</li>
+          </ul>
+        </div>
+        <div class="info">
+          <p>Hostname: <strong id="hostname"></strong></p>
+          <p>Served from pod with persistent storage</p>
+        </div>
+      </div>
+      <script>
+        document.getElementById('hostname').textContent = window.location.hostname;
+      </script>
+    </body>
+    </html>
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: content
+          mountPath: /usr/share/nginx/html
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: content
+        configMap:
+          name: nginx-content
+      - name: data
+        persistentVolumeClaim:
+          claimName: nginx-pvc
+---
+# Service with LoadBalancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: demo
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx
+  ports:
+  - port: 80
+    targetPort: 80

@@ -1,0 +1,36 @@
+---
+# Admin Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+# Cluster Role Binding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+# Long-lived token secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: admin-user-token
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/service-account.name: admin-user
+type: kubernetes.io/service-account-token
+---
+# NodePort Service (patch the existing dashboard service)
+# Run: kubectl -n kubernetes-dashboard patch svc kubernetes-dashboard \
+#   --type='json' -p '[{"op": "replace", "path": "/spec/type", "value": "NodePort"},
+#   {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30443}]'
