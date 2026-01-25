@@ -1,0 +1,12 @@
+---
+# Kubernetes distribution: k3s or kubeadm
+# Override with: ansible-playbook -e k8s_distro=kubeadm
+k8s_distro: k3s
+
+# LoadBalancer implementation: cilium or metallb
+# Override with: ansible-playbook -e lb_implementation=metallb
+lb_implementation: cilium
+
+# Derived paths based on distro
+kubectl_bin: "{{ '/usr/local/bin/k3s kubectl' if k8s_distro == 'k3s' else 'kubectl' }}"
+kubeconfig_path: "{{ '/etc/rancher/k3s/k3s.yaml' if k8s_distro == 'k3s' else '/etc/kubernetes/admin.conf' }}"

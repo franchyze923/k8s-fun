@@ -1,0 +1,107 @@
+---
+# MetalLB LoadBalancer Installation Playbook
+
+- name: Deploy MetalLB LoadBalancer
+  hosts: master
+  tasks:
+    - name: Check if MetalLB namespace exists
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} get namespace metallb-system
+      register: metallb_ns_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install MetalLB using manifest
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.5/config/manifests/metallb-native.yaml
+      when: metallb_ns_check.rc != 0
+      register: metallb_install
+      changed_when: "'created' in metallb_install.stdout or 'configured' in metallb_install.stdout"
+
+    - name: Wait for MetalLB controller deployment
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} wait --namespace metallb-system \
+          --for=condition=available --timeout=300s \
+          deployment/controller
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+      changed_when: false
+
+    - name: Wait for MetalLB speaker daemonset
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} wait --namespace metallb-system \
+          --for=condition=ready --timeout=300s \
+          pod -l app=metallb,component=speaker
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+      changed_when: false
+
+    - name: Create MetalLB L2Advertisement
+      ansible.builtin.copy:
+        dest: /tmp/metallb-l2advertisement.yaml
+        mode: '0644'
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: l2-advert
+            namespace: metallb-system
+          spec:
+            ipAddressPools:
+            - lb-pool
+
+    - name: Apply MetalLB L2Advertisement
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/metallb-l2advertisement.yaml"
+      register: l2_apply
+      changed_when: "'created' in l2_apply.stdout or 'configured' in l2_apply.stdout"
+
+    - name: Create MetalLB IPAddressPool
+      ansible.builtin.copy:
+        dest: /tmp/metallb-ippool.yaml
+        mode: '0644'
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: lb-pool
+            namespace: metallb-system
+          spec:
+            addresses:
+            - 192.168.40.200-192.168.40.220
+
+    - name: Apply MetalLB IPAddressPool
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/metallb-ippool.yaml"
+      register: pool_apply
+      changed_when: "'created' in pool_apply.stdout or 'configured' in pool_apply.stdout"
+
+    - name: Get MetalLB controller status
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} get pods -n metallb-system
+      register: metallb_status
+      changed_when: false
+
+    - name: Display MetalLB status
+      ansible.builtin.debug:
+        msg: "{{ metallb_status.stdout_lines }}"
+
+    - name: Display instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "MetalLB LoadBalancer configured!"
+          - "=========================================="
+          - ""
+          - "IP Pool: 192.168.40.200 - 192.168.40.220"
+          - ""
+          - "To use LoadBalancer, create a service with:"
+          - "  spec:"
+          - "    type: LoadBalancer"
+          - ""
+          - "Example:"
+          - "  kubectl expose deployment nginx --type=LoadBalancer --port=80"
+          - ""
+          - "=========================================="

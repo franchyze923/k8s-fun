@@ -25,7 +25,7 @@
                 kubernetes.io/os: linux
 
     - name: Apply L2 announcement policy
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/cilium-l2-policy.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/cilium-l2-policy.yaml"
       changed_when: true
 
     - name: Create CiliumLoadBalancerIPPool
@@ -43,12 +43,12 @@
               stop: "192.168.40.220"
 
     - name: Apply LoadBalancer IP pool
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/cilium-lb-pool.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/cilium-lb-pool.yaml"
       changed_when: true
 
     - name: Verify Cilium L2 announcements
       ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        export KUBECONFIG={{ kubeconfig_path }}
         /usr/local/bin/cilium config view | grep l2announcements || echo "l2announcements.enabled: configured via install"
       register: l2_status
       changed_when: false

@@ -19,20 +19,20 @@
         force: true
 
     - name: Deploy Rook CRDs
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/rook/deploy/examples/crds.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/rook/deploy/examples/crds.yaml"
       changed_when: true
 
     - name: Deploy Rook common resources
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/rook/deploy/examples/common.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/rook/deploy/examples/common.yaml"
       changed_when: true
 
     - name: Deploy Rook operator
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/rook/deploy/examples/operator.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/rook/deploy/examples/operator.yaml"
       changed_when: true
 
     - name: Wait for Rook operator to be ready
       ansible.builtin.command: >
-        /usr/local/bin/k3s kubectl -n rook-ceph wait
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph wait
         --for=condition=Ready pod -l app=rook-ceph-operator
         --timeout=300s
       changed_when: false
@@ -92,7 +92,7 @@
         mode: '0644'
 
     - name: Deploy Ceph cluster
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-cluster.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/ceph-cluster.yaml"
       changed_when: true
 
     - name: Wait for Ceph cluster to initialize (3-5 minutes)
@@ -102,7 +102,7 @@
 
     - name: Wait for Ceph mons to be ready
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n rook-ceph get pods -l app=rook-ceph-mon --no-headers | grep -c "Running" || echo "0"
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get pods -l app=rook-ceph-mon --no-headers | grep -c "Running" || echo "0"
       register: mon_count
       until: mon_count.stdout | int >= 1
       retries: 20
@@ -125,7 +125,7 @@
         mode: '0644'
 
     - name: Deploy CephBlockPool
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-blockpool.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/ceph-blockpool.yaml"
       changed_when: true
 
     - name: Create StorageClass
@@ -156,11 +156,11 @@
         mode: '0644'
 
     - name: Deploy StorageClass
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-storageclass.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/ceph-storageclass.yaml"
       changed_when: true
 
     - name: Get storage classes
-      ansible.builtin.command: /usr/local/bin/k3s kubectl get sc
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} get sc"
       changed_when: false
       register: sc_output
 
@@ -169,7 +169,7 @@
         msg: "{{ sc_output.stdout_lines }}"
 
     - name: Get Rook-Ceph pods
-      ansible.builtin.command: /usr/local/bin/k3s kubectl -n rook-ceph get pods
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get pods"
       changed_when: false
       register: pods_output
 

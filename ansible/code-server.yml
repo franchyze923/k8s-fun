@@ -5,13 +5,13 @@
   hosts: master
   tasks:
     - name: Create code-server namespace
-      ansible.builtin.command: /usr/local/bin/k3s kubectl create namespace code-server --dry-run=client -o yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} create namespace code-server --dry-run=client -o yaml"
       register: ns_yaml
       changed_when: false
 
     - name: Apply code-server namespace
       ansible.builtin.shell: |
-        echo '{{ ns_yaml.stdout }}' | /usr/local/bin/k3s kubectl apply -f -
+        echo '{{ ns_yaml.stdout }}' | {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f -
       changed_when: true
 
     - name: Create code-server manifests
@@ -153,13 +153,13 @@
               targetPort: 8443
 
     - name: Deploy code-server
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/code-server.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/code-server.yaml"
       changed_when: true
 
     - name: Wait for PVCs to bind
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n code-server wait --for=jsonpath='{.status.phase}'=Bound pvc/code-server-config --timeout=120s
-        /usr/local/bin/k3s kubectl -n code-server wait --for=jsonpath='{.status.phase}'=Bound pvc/shared-repos --timeout=120s
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n code-server wait --for=jsonpath='{.status.phase}'=Bound pvc/code-server-config --timeout=120s
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n code-server wait --for=jsonpath='{.status.phase}'=Bound pvc/shared-repos --timeout=120s
       changed_when: false
       retries: 3
       delay: 10
@@ -168,7 +168,7 @@
 
     - name: Wait for deployment to be ready (includes init container for cloning repos)
       ansible.builtin.command: >
-        /usr/local/bin/k3s kubectl -n code-server wait --for=condition=Available deployment/code-server --timeout=300s
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n code-server wait --for=condition=Available deployment/code-server --timeout=300s
       changed_when: false
       retries: 3
       delay: 10
@@ -177,7 +177,7 @@
 
     - name: Get LoadBalancer IP
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n code-server get svc code-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n code-server get svc code-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
       register: lb_ip
       changed_when: false
       retries: 6

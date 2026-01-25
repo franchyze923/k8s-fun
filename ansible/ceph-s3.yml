@@ -36,12 +36,12 @@
                   memory: "1Gi"
 
     - name: Deploy CephObjectStore
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-objectstore.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/ceph-objectstore.yaml"
       changed_when: true
 
     - name: Wait for RGW pod to be ready
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n rook-ceph get pods -l app=rook-ceph-rgw --no-headers 2>/dev/null | grep -c "Running" || echo "0"
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get pods -l app=rook-ceph-rgw --no-headers 2>/dev/null | grep -c "Running" || echo "0"
       register: rgw_count
       until: rgw_count.stdout | int >= 1
       retries: 30
@@ -63,11 +63,11 @@
             displayName: "S3 User"
 
     - name: Deploy S3 user
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-s3-user.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/ceph-s3-user.yaml"
       changed_when: true
 
     - name: Wait for S3 user secret to be created
-      ansible.builtin.command: /usr/local/bin/k3s kubectl -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user"
       retries: 12
       delay: 5
       register: result
@@ -76,13 +76,13 @@
 
     - name: Get S3 access key
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user -o jsonpath='{.data.AccessKey}' | base64 -d
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user -o jsonpath='{.data.AccessKey}' | base64 -d
       register: s3_access_key
       changed_when: false
 
     - name: Get S3 secret key
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user -o jsonpath='{.data.SecretKey}' | base64 -d
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get secret rook-ceph-object-user-my-store-s3-user -o jsonpath='{.data.SecretKey}' | base64 -d
       register: s3_secret_key
       changed_when: false
 
@@ -111,12 +111,12 @@
               name: http
 
     - name: Deploy S3 NodePort service
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/ceph-s3-nodeport.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/ceph-s3-nodeport.yaml"
       changed_when: true
 
     - name: Get S3 NodePort
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n rook-ceph get svc rgw-external -o jsonpath='{.spec.ports[0].nodePort}'
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get svc rgw-external -o jsonpath='{.spec.ports[0].nodePort}'
       register: s3_nodeport
       changed_when: false
 
@@ -139,7 +139,7 @@
       become: false
 
     - name: Get RGW pods
-      ansible.builtin.command: /usr/local/bin/k3s kubectl -n rook-ceph get pods -l app=rook-ceph-rgw
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get pods -l app=rook-ceph-rgw"
       register: rgw_pods
       changed_when: false
 

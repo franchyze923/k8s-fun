@@ -5,13 +5,13 @@
   hosts: master
   tasks:
     - name: Create demo namespace
-      ansible.builtin.command: /usr/local/bin/k3s kubectl create namespace demo --dry-run=client -o yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} create namespace demo --dry-run=client -o yaml"
       register: ns_yaml
       changed_when: false
 
     - name: Apply demo namespace
       ansible.builtin.shell: |
-        echo '{{ ns_yaml.stdout }}' | /usr/local/bin/k3s kubectl apply -f -
+        echo '{{ ns_yaml.stdout }}' | {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f -
       changed_when: true
 
     - name: Create demo app manifests
@@ -135,12 +135,12 @@
               targetPort: 80
 
     - name: Deploy demo app
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/demo-app.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/demo-app.yaml"
       changed_when: true
 
     - name: Wait for PVC to bind
       ansible.builtin.command: >
-        /usr/local/bin/k3s kubectl -n demo wait --for=jsonpath='{.status.phase}'=Bound pvc/nginx-pvc --timeout=120s
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo wait --for=jsonpath='{.status.phase}'=Bound pvc/nginx-pvc --timeout=120s
       changed_when: false
       retries: 3
       delay: 10
@@ -149,7 +149,7 @@
 
     - name: Wait for deployment to be ready
       ansible.builtin.command: >
-        /usr/local/bin/k3s kubectl -n demo wait --for=condition=Available deployment/nginx --timeout=120s
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo wait --for=condition=Available deployment/nginx --timeout=120s
       changed_when: false
       retries: 3
       delay: 10
@@ -159,11 +159,11 @@
     - name: Get demo app status
       ansible.builtin.shell: |
         echo "=== Pods ===" && \
-        /usr/local/bin/k3s kubectl -n demo get pods -o wide && \
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo get pods -o wide && \
         echo "" && echo "=== PVC ===" && \
-        /usr/local/bin/k3s kubectl -n demo get pvc && \
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo get pvc && \
         echo "" && echo "=== Service ===" && \
-        /usr/local/bin/k3s kubectl -n demo get svc
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo get svc
       register: demo_status
       changed_when: false
 
@@ -173,7 +173,7 @@
 
     - name: Get LoadBalancer IP
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n demo get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
       register: lb_ip
       changed_when: false
       retries: 6

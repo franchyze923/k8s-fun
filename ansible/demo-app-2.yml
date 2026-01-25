@@ -5,13 +5,13 @@
   hosts: master
   tasks:
     - name: Create demo2 namespace
-      ansible.builtin.command: /usr/local/bin/k3s kubectl create namespace demo2 --dry-run=client -o yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} create namespace demo2 --dry-run=client -o yaml"
       register: ns_yaml
       changed_when: false
 
     - name: Apply demo2 namespace
       ansible.builtin.shell: |
-        echo '{{ ns_yaml.stdout }}' | /usr/local/bin/k3s kubectl apply -f -
+        echo '{{ ns_yaml.stdout }}' | {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f -
       changed_when: true
 
     - name: Create second demo app manifests
@@ -110,12 +110,12 @@
               targetPort: 80
 
     - name: Deploy second demo app
-      ansible.builtin.command: /usr/local/bin/k3s kubectl apply -f /tmp/demo-app-2.yaml
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/demo-app-2.yaml"
       changed_when: true
 
     - name: Wait for deployment to be ready
       ansible.builtin.command: >
-        /usr/local/bin/k3s kubectl -n demo2 wait --for=condition=Available deployment/nginx --timeout=120s
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo2 wait --for=condition=Available deployment/nginx --timeout=120s
       changed_when: false
       retries: 3
       delay: 10
@@ -124,7 +124,7 @@
 
     - name: Get LoadBalancer IP
       ansible.builtin.shell: |
-        /usr/local/bin/k3s kubectl -n demo2 get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo2 get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
       register: lb_ip
       changed_when: false
       retries: 6

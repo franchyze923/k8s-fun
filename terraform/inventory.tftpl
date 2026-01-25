@@ -8,6 +8,6 @@ ${master_name} ansible_host=${master_ip}
 ${worker.name} ansible_host=${worker.ip}
 %{ endfor ~}
 
-[k3s_cluster:children]
+[k8s_cluster:children]
 master
 workers
