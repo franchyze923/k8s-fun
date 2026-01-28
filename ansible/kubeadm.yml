@@ -1,7 +1,10 @@
 ---
 # kubeadm Cluster Installation Playbook
+# Usage: ansible-playbook kubeadm.yml [-e k8s_version=1.30]
 
 - name: Prepare all nodes
+  vars:
+    k8s_minor_version: "{{ k8s_version | default('1.35', true) }}"
   hosts: k8s_cluster
   gather_facts: false
   tasks:
@@ -13,17 +16,58 @@
     - name: Gather facts after SSH is ready
       ansible.builtin.setup:
 
+    - name: Check if firewalld is installed
+      ansible.builtin.command: systemctl list-unit-files firewalld.service
+      register: firewalld_check
+      changed_when: false
+      failed_when: false
+
     - name: Disable firewalld
       ansible.builtin.systemd:
         name: firewalld
         state: stopped
         enabled: false
-      ignore_errors: true
+      when: firewalld_check.rc == 0 and 'firewalld.service' in firewalld_check.stdout
+
+    - name: Wait for NTP sync
+      ansible.builtin.shell: timedatectl show -p NTPSynchronized --value
+      register: ntp_sync
+      until: ntp_sync.stdout == "yes"
+      retries: 30
+      delay: 10
+      changed_when: false
 
     - name: Wait for cloud-init to complete
-      ansible.builtin.command: cloud-init status --wait
+      ansible.builtin.shell: cloud-init status | grep -qE 'done|error'
+      register: cloud_init_result
+      until: cloud_init_result.rc == 0
+      retries: 60
+      delay: 10
       changed_when: false
-      timeout: 600
+
+    - name: Create user fran with sudo access
+      ansible.builtin.user:
+        name: fran
+        password: "{{ '248919' | password_hash('sha512') }}"
+        groups: wheel
+        append: true
+        shell: /bin/bash
+
+    - name: Enable password authentication for SSH
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+      notify: Restart sshd
+
+    - name: Remove old Kubernetes repo if exists
+      ansible.builtin.file:
+        path: /etc/yum.repos.d/kubernetes.repo
+        state: absent
+
+    - name: Clean dnf cache
+      ansible.builtin.command: dnf clean all
+      changed_when: true
 
     - name: Disable swap
       ansible.builtin.command: swapoff -a
@@ -104,11 +148,14 @@
         content: |
           [kubernetes]
           name=Kubernetes
-          baseurl=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/
+          baseurl=https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/rpm/
           enabled=1
-          gpgcheck=1
-          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/repodata/repomd.xml.key
-          exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+          gpgcheck=0
+          sslverify=0
+
+    - name: Refresh dnf cache for kubernetes repo
+      ansible.builtin.command: dnf makecache --refresh
+      changed_when: true
 
     - name: Install kubeadm, kubelet, kubectl
       ansible.builtin.dnf:
@@ -117,13 +164,18 @@
           - kubeadm
           - kubectl
         state: present
-        disable_excludes: kubernetes
 
     - name: Enable and start kubelet
       ansible.builtin.systemd:
         name: kubelet
         state: started
         enabled: true
+
+  handlers:
+    - name: Restart sshd
+      ansible.builtin.systemd:
+        name: sshd
+        state: restarted
 
 - name: Initialize kubeadm master
   hosts: master
@@ -196,6 +248,25 @@
     - name: Display cluster nodes
       ansible.builtin.debug:
         msg: "{{ nodes_output.stdout_lines }}"
+
+    - name: Setup kubeconfig for rocky user
+      block:
+        - name: Create .kube directory for rocky
+          ansible.builtin.file:
+            path: /home/rocky/.kube
+            state: directory
+            owner: rocky
+            group: rocky
+            mode: '0700'
+
+        - name: Copy kubeconfig for rocky user
+          ansible.builtin.copy:
+            src: /etc/kubernetes/admin.conf
+            dest: /home/rocky/.kube/config
+            owner: rocky
+            group: rocky
+            mode: '0600'
+            remote_src: true
 
     - name: Fetch kubeconfig
       ansible.builtin.fetch:

@@ -5,6 +5,7 @@ resource "proxmox_virtual_environment_download_file" "rocky_cloud_image" {
   node_name    = var.proxmox_node
   url          = var.rocky_image_url
   file_name    = "rocky-9-cloud.img"
+  overwrite    = false
 }
 
 # Create VMs
@@ -42,6 +43,13 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
     size         = tonumber(replace(var.vm_disk_size, "G", ""))
     discard      = "on"
     ssd          = true
+  }
+
+  # Wait for cloud-init and QEMU agent
+  lifecycle {
+    ignore_changes = [
+      disk[0].file_id,
+    ]
   }
 
   # Ceph OSD disk (raw, unformatted)
@@ -83,12 +91,6 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   # Serial console for cloud-init
   serial_device {}
 
-  # Wait for cloud-init and QEMU agent
-  lifecycle {
-    ignore_changes = [
-      disk[0].file_id,
-    ]
-  }
 }
 
 # Output the VM IPs (requires QEMU agent)

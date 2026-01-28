@@ -1,0 +1,36 @@
+---
+# Node tools - k9s, htop, btop
+
+- name: Install node tools
+  hosts: k8s_cluster
+  tasks:
+    - name: Enable EPEL repository
+      ansible.builtin.dnf:
+        name: epel-release
+        state: present
+
+    - name: Install htop and btop
+      ansible.builtin.dnf:
+        name:
+          - htop
+          - btop
+        state: present
+
+    - name: Install k9s
+      ansible.builtin.shell: |
+        K9S_VERSION=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+        curl -L --fail -o /tmp/k9s.tar.gz https://github.com/derailed/k9s/releases/download/v${K9S_VERSION}/k9s_Linux_amd64.tar.gz
+        tar xzf /tmp/k9s.tar.gz -C /usr/local/bin k9s
+        chmod 755 /usr/local/bin/k9s
+        rm -f /tmp/k9s.tar.gz
+      args:
+        creates: /usr/local/bin/k9s
+
+    - name: Verify k9s installation
+      ansible.builtin.command: /usr/local/bin/k9s version --short
+      changed_when: false
+      register: k9s_version
+
+    - name: Display k9s version
+      ansible.builtin.debug:
+        msg: "k9s installed: {{ k9s_version.stdout }}"

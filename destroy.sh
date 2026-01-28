@@ -15,5 +15,5 @@ terraform destroy -auto-approve
 cd ..
 
 echo "=== Cleaning up generated files ==="
-rm -f kubeconfig dashboard-token.txt s3-credentials.txt ansible/inventory.ini .k8s-distro
+rm -f kubeconfig dashboard-token.txt s3-credentials.txt argocd-credentials.txt keycloak-credentials.txt ansible/inventory.ini .k8s-distro .lb-implementation
 echo "=== Cluster destroyed ==="

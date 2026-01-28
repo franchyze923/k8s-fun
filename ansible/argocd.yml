@@ -1,0 +1,79 @@
+---
+# Argo CD - GitOps continuous delivery for Kubernetes
+
+- name: Deploy Argo CD
+  hosts: master
+  tasks:
+    - name: Create argocd namespace
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} create namespace argocd --dry-run=client -o yaml"
+      register: ns_yaml
+      changed_when: false
+
+    - name: Apply argocd namespace
+      ansible.builtin.shell: |
+        echo '{{ ns_yaml.stdout }}' | {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f -
+      changed_when: true
+
+    - name: Install Argo CD
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -n argocd
+        -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+      changed_when: true
+
+    - name: Wait for Argo CD server deployment to be ready
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n argocd wait --for=condition=Available deployment/argocd-server --timeout=300s
+      changed_when: false
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+
+    - name: Patch argocd-server service to LoadBalancer
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n argocd patch svc argocd-server
+        -p '{"spec": {"type": "LoadBalancer"}}'
+      changed_when: true
+
+    - name: Get LoadBalancer IP
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n argocd get svc argocd-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: lb_ip
+      changed_when: false
+      retries: 6
+      delay: 5
+      until: lb_ip.stdout != ""
+
+    - name: Get initial admin password
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+      register: argocd_password
+      changed_when: false
+
+    - name: Save credentials to local file
+      ansible.builtin.copy:
+        content: |
+          Argo CD URL: https://{{ lb_ip.stdout }}
+          Username: admin
+          Password: {{ argocd_password.stdout }}
+        dest: "{{ playbook_dir }}/../argocd-credentials.txt"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Display access instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Argo CD deployed!"
+          - "=========================================="
+          - ""
+          - "Access Argo CD at:"
+          - "  https://{{ lb_ip.stdout }}"
+          - ""
+          - "Username: admin"
+          - "Password: {{ argocd_password.stdout }}"
+          - ""
+          - "Credentials saved to: argocd-credentials.txt"
+          - ""
+          - "=========================================="

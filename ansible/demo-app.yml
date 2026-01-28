@@ -1,5 +1,5 @@
 ---
-# Demo Nginx App - demonstrates k8s, storage, and networking
+# Demo Nginx App - demonstrates k8s and networking
 
 - name: Deploy Demo Nginx App
   hosts: master
@@ -19,20 +19,6 @@
         dest: /tmp/demo-app.yaml
         mode: '0644'
         content: |
-          ---
-          # PVC using Rook-Ceph storage
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-            name: nginx-pvc
-            namespace: demo
-          spec:
-            accessModes:
-              - ReadWriteOnce
-            storageClassName: rook-ceph-block
-            resources:
-              requests:
-                storage: 1Gi
           ---
           # ConfigMap with custom index.html
           apiVersion: v1
@@ -60,22 +46,12 @@
                   <div class="info">
                     <h2 class="success">Everything is working!</h2>
                     <ul>
-                      <li><strong>k3s:</strong> Kubernetes cluster running</li>
+                      <li><strong>Kubernetes:</strong> Cluster running</li>
                       <li><strong>Cilium:</strong> CNI networking active</li>
-                      <li><strong>Rook-Ceph:</strong> Persistent storage attached</li>
-                      <li><strong>NodePort:</strong> External access configured</li>
+                      <li><strong>LoadBalancer:</strong> External access configured</li>
                     </ul>
                   </div>
-                  <div class="info">
-                    <p>Hostname: <strong id="hostname"></strong></p>
-                    <p>Served from pod with persistent storage</p>
-                  </div>
                 </div>
-                <script>
-                  fetch('/etc/hostname').catch(() => {
-                    document.getElementById('hostname').textContent = window.location.hostname;
-                  });
-                </script>
               </body>
               </html>
           ---
@@ -86,7 +62,7 @@
             name: nginx
             namespace: demo
           spec:
-            replicas: 1  # Single replica for RWO storage
+            replicas: 1
             selector:
               matchLabels:
                 app: nginx
@@ -103,8 +79,6 @@
                   volumeMounts:
                   - name: content
                     mountPath: /usr/share/nginx/html
-                  - name: data
-                    mountPath: /data
                   resources:
                     requests:
                       memory: "64Mi"
@@ -116,11 +90,8 @@
                 - name: content
                   configMap:
                     name: nginx-content
-                - name: data
-                  persistentVolumeClaim:
-                    claimName: nginx-pvc
           ---
-          # Service with LoadBalancer (uses Cilium L2 announcements)
+          # Service with LoadBalancer
           apiVersion: v1
           kind: Service
           metadata:
@@ -138,15 +109,6 @@
       ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/demo-app.yaml"
       changed_when: true
 
-    - name: Wait for PVC to bind
-      ansible.builtin.command: >
-        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo wait --for=jsonpath='{.status.phase}'=Bound pvc/nginx-pvc --timeout=120s
-      changed_when: false
-      retries: 3
-      delay: 10
-      register: result
-      until: result.rc == 0
-
     - name: Wait for deployment to be ready
       ansible.builtin.command: >
         {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo wait --for=condition=Available deployment/nginx --timeout=120s
@@ -155,21 +117,6 @@
       delay: 10
       register: result
       until: result.rc == 0
-
-    - name: Get demo app status
-      ansible.builtin.shell: |
-        echo "=== Pods ===" && \
-        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo get pods -o wide && \
-        echo "" && echo "=== PVC ===" && \
-        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo get pvc && \
-        echo "" && echo "=== Service ===" && \
-        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n demo get svc
-      register: demo_status
-      changed_when: false
-
-    - name: Display demo app status
-      ansible.builtin.debug:
-        msg: "{{ demo_status.stdout_lines }}"
 
     - name: Get LoadBalancer IP
       ansible.builtin.shell: |

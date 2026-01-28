@@ -1,0 +1,278 @@
+---
+# ConfigMap with HTML app that uses Keycloak JS adapter
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-demo-app
+  namespace: keycloak
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Keycloak Demo App</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          max-width: 800px;
+          margin: 50px auto;
+          padding: 20px;
+          background: #f5f5f5;
+        }
+        .card {
+          background: white;
+          border-radius: 8px;
+          padding: 20px;
+          margin: 20px 0;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+          background: #007bff;
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 4px;
+          cursor: pointer;
+          margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button.logout { background: #dc3545; }
+        button.logout:hover { background: #c82333; }
+        pre {
+          background: #f8f9fa;
+          padding: 15px;
+          border-radius: 4px;
+          overflow-x: auto;
+        }
+        .hidden { display: none; }
+        .status { padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #cce5ff; color: #004085; }
+        h1 { color: #333; }
+        .setup-steps { text-align: left; }
+        .setup-steps li { margin: 10px 0; }
+        code { background: #e9ecef; padding: 2px 6px; border-radius: 3px; }
+      </style>
+    </head>
+    <body>
+      <h1>Keycloak Demo App</h1>
+
+      <!-- Setup Instructions (shown when not configured) -->
+      <div id="setup-card" class="card">
+        <h2>Setup Required</h2>
+        <p>Before using this app, configure Keycloak:</p>
+        <ol class="setup-steps">
+          <li>Open <a href="" id="keycloak-admin-link" target="_blank">Keycloak Admin Console</a></li>
+          <li>Login with <code>admin</code> / <code>changeme</code></li>
+          <li>Create a new Realm called <code>demo</code></li>
+          <li>In the <code>demo</code> realm, go to <strong>Clients</strong> → <strong>Create client</strong></li>
+          <li>Set Client ID: <code>demo-app</code>, Client type: <code>OpenID Connect</code></li>
+          <li>On the next screen, enable <strong>Standard flow</strong> (should be on by default)</li>
+          <li>Set these URLs (replace IP with your Keycloak LoadBalancer IP):
+            <ul>
+              <li>Root URL: <code id="root-url"></code></li>
+              <li>Valid redirect URIs: <code id="redirect-uri"></code></li>
+              <li>Web origins: <code id="web-origin"></code></li>
+            </ul>
+          </li>
+          <li>Save the client</li>
+          <li>Go to <strong>Users</strong> → <strong>Add user</strong>, create a test user</li>
+          <li>Set a password for the user in the <strong>Credentials</strong> tab</li>
+        </ol>
+        <p>Once configured, enter your Keycloak URL:</p>
+        <input type="text" id="keycloak-url-input" placeholder="http://192.168.40.x:8080" style="padding: 8px; width: 250px;">
+        <button onclick="saveKeycloakUrl()">Save & Connect</button>
+      </div>
+
+      <!-- Main App (shown when authenticated) -->
+      <div id="authenticated-card" class="card hidden">
+        <h2>Welcome, <span id="username"></span>!</h2>
+        <div class="status success">You are authenticated with Keycloak</div>
+        <button class="logout" onclick="keycloak.logout()">Logout</button>
+        <button onclick="showToken()">Show Access Token</button>
+        <button onclick="showIdToken()">Show ID Token</button>
+        <button onclick="showUserInfo()">Show User Info</button>
+      </div>
+
+      <!-- Login Card (shown when not authenticated but configured) -->
+      <div id="login-card" class="card hidden">
+        <h2>Not Logged In</h2>
+        <p>Click the button below to login with Keycloak:</p>
+        <button onclick="keycloak.login()">Login with Keycloak</button>
+        <button onclick="resetConfig()">Change Keycloak URL</button>
+      </div>
+
+      <!-- Token/Info Display -->
+      <div id="token-card" class="card hidden">
+        <h3 id="token-title">Token</h3>
+        <pre id="token-content"></pre>
+      </div>
+
+      <!-- Error Display -->
+      <div id="error-card" class="card hidden">
+        <div class="status error" id="error-message"></div>
+        <button onclick="resetConfig()">Reset Configuration</button>
+      </div>
+
+      <script>
+        let keycloak = null;
+        const STORAGE_KEY = 'keycloak-demo-url';
+
+        // Update setup URLs based on current location
+        function updateSetupUrls() {
+          const appUrl = window.location.origin + window.location.pathname;
+          document.getElementById('root-url').textContent = appUrl;
+          document.getElementById('redirect-uri').textContent = appUrl + '*';
+          document.getElementById('web-origin').textContent = window.location.origin;
+        }
+
+        function saveKeycloakUrl() {
+          const url = document.getElementById('keycloak-url-input').value.trim();
+          if (!url) {
+            alert('Please enter a Keycloak URL');
+            return;
+          }
+          localStorage.setItem(STORAGE_KEY, url);
+          initKeycloak(url);
+        }
+
+        function resetConfig() {
+          localStorage.removeItem(STORAGE_KEY);
+          location.reload();
+        }
+
+        function showCard(cardId) {
+          ['setup-card', 'authenticated-card', 'login-card', 'token-card', 'error-card'].forEach(id => {
+            document.getElementById(id).classList.add('hidden');
+          });
+          if (cardId) {
+            document.getElementById(cardId).classList.remove('hidden');
+          }
+        }
+
+        function showError(message) {
+          document.getElementById('error-message').textContent = message;
+          showCard('error-card');
+        }
+
+        function showToken() {
+          document.getElementById('token-title').textContent = 'Access Token (Decoded)';
+          document.getElementById('token-content').textContent = JSON.stringify(keycloak.tokenParsed, null, 2);
+          document.getElementById('token-card').classList.remove('hidden');
+        }
+
+        function showIdToken() {
+          document.getElementById('token-title').textContent = 'ID Token (Decoded)';
+          document.getElementById('token-content').textContent = JSON.stringify(keycloak.idTokenParsed, null, 2);
+          document.getElementById('token-card').classList.remove('hidden');
+        }
+
+        function showUserInfo() {
+          keycloak.loadUserInfo().then(info => {
+            document.getElementById('token-title').textContent = 'User Info';
+            document.getElementById('token-content').textContent = JSON.stringify(info, null, 2);
+            document.getElementById('token-card').classList.remove('hidden');
+          });
+        }
+
+        function initKeycloak(keycloakUrl) {
+          // Load Keycloak JS adapter dynamically
+          const script = document.createElement('script');
+          script.src = keycloakUrl + '/js/keycloak.js';
+          script.onload = function() {
+            keycloak = new Keycloak({
+              url: keycloakUrl,
+              realm: 'demo',
+              clientId: 'demo-app'
+            });
+
+            keycloak.init({
+              onLoad: 'check-sso',
+              silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
+              checkLoginIframe: false
+            }).then(authenticated => {
+              if (authenticated) {
+                document.getElementById('username').textContent =
+                  keycloak.tokenParsed.preferred_username || keycloak.tokenParsed.name || 'User';
+                showCard('authenticated-card');
+              } else {
+                showCard('login-card');
+              }
+            }).catch(err => {
+              console.error('Keycloak init failed:', err);
+              showError('Failed to connect to Keycloak. Make sure the URL is correct and the realm/client are configured. Error: ' + err);
+            });
+          };
+          script.onerror = function() {
+            showError('Could not load Keycloak JS adapter. Check the URL: ' + keycloakUrl);
+          };
+          document.head.appendChild(script);
+        }
+
+        // On page load
+        window.onload = function() {
+          updateSetupUrls();
+          const savedUrl = localStorage.getItem(STORAGE_KEY);
+
+          if (savedUrl) {
+            document.getElementById('keycloak-admin-link').href = savedUrl + '/admin';
+            initKeycloak(savedUrl);
+          } else {
+            document.getElementById('keycloak-admin-link').href = '#';
+            showCard('setup-card');
+          }
+        };
+      </script>
+    </body>
+    </html>
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-demo-app
+  namespace: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-demo-app
+  template:
+    metadata:
+      labels:
+        app: keycloak-demo-app
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+      volumes:
+      - name: html
+        configMap:
+          name: keycloak-demo-app
+---
+# Service with LoadBalancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-demo-app
+  namespace: keycloak
+spec:
+  type: LoadBalancer
+  selector:
+    app: keycloak-demo-app
+  ports:
+  - port: 80
+    targetPort: 80

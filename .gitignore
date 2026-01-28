@@ -22,3 +22,5 @@ config.env
 
 # OS files
 .DS_Store
+argocd-credentials.txt
+keycloak-credentials.txt

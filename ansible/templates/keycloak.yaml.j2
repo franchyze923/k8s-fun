@@ -1,0 +1,107 @@
+{% if install_ceph | default(false) | bool %}
+---
+# PVC for Keycloak data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: keycloak-data
+  namespace: keycloak
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: rook-ceph-block
+  resources:
+    requests:
+      storage: 5Gi
+{% endif %}
+---
+# Secret for admin credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-admin
+  namespace: keycloak
+type: Opaque
+stringData:
+  username: "admin"
+  password: "changeme"
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+{% if not (install_ceph | default(false) | bool) %}
+      initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        command: ['sh', '-c', 'chown -R 1000:1000 /data']
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        securityContext:
+          runAsUser: 0
+{% endif %}
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:latest
+        args:
+        - start-dev
+        ports:
+        - containerPort: 8080
+        env:
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin
+              key: username
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin
+              key: password
+        volumeMounts:
+        - name: data
+          mountPath: /opt/keycloak/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: data
+{% if install_ceph | default(false) | bool %}
+        persistentVolumeClaim:
+          claimName: keycloak-data
+{% else %}
+        hostPath:
+          path: /opt/keycloak/data
+          type: DirectoryOrCreate
+{% endif %}
+---
+# Service with LoadBalancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  type: LoadBalancer
+  selector:
+    app: keycloak
+  ports:
+  - port: 8080
+    targetPort: 8080

@@ -1,0 +1,60 @@
+---
+# Keycloak Demo App - Simple OIDC integration example
+
+- name: Deploy Keycloak Demo App
+  hosts: master
+  tasks:
+    - name: Create keycloak-demo-app manifests
+      ansible.builtin.template:
+        src: templates/keycloak-demo-app.yaml.j2
+        dest: /tmp/keycloak-demo-app.yaml
+        mode: '0644'
+
+    - name: Deploy keycloak-demo-app
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/keycloak-demo-app.yaml"
+      changed_when: true
+
+    - name: Wait for deployment to be ready
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n keycloak wait --for=condition=Available deployment/keycloak-demo-app --timeout=120s
+      changed_when: false
+      retries: 3
+      delay: 5
+      register: result
+      until: result.rc == 0
+
+    - name: Get LoadBalancer IP
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n keycloak get svc keycloak-demo-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: lb_ip
+      changed_when: false
+      retries: 6
+      delay: 5
+      until: lb_ip.stdout != ""
+
+    - name: Get Keycloak LoadBalancer IP
+      ansible.builtin.shell: |
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n keycloak get svc keycloak -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: keycloak_ip
+      changed_when: false
+
+    - name: Display access instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Keycloak Demo App deployed!"
+          - "=========================================="
+          - ""
+          - "Demo App URL: http://{{ lb_ip.stdout }}"
+          - ""
+          - "To use this app:"
+          - "1. Open Keycloak Admin: http://{{ keycloak_ip.stdout }}:8080/admin"
+          - "2. Login with admin / changeme"
+          - "3. Create realm 'demo'"
+          - "4. Create client 'demo-app' (OpenID Connect)"
+          - "5. Set Valid redirect URIs: http://{{ lb_ip.stdout }}/*"
+          - "6. Set Web origins: http://{{ lb_ip.stdout }}"
+          - "7. Create a test user in the demo realm"
+          - "8. Open the Demo App and login!"
+          - ""
+          - "=========================================="

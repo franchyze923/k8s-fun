@@ -1,0 +1,146 @@
+{% if install_ceph | default(false) | bool %}
+---
+# PVC for code-server config
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: code-server-config
+  namespace: code-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: rook-ceph-block
+  resources:
+    requests:
+      storage: 10Gi
+---
+# PVC for shared repos
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-repos
+  namespace: code-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: rook-ceph-block
+  resources:
+    requests:
+      storage: 5Gi
+{% endif %}
+---
+# Secret for password
+apiVersion: v1
+kind: Secret
+metadata:
+  name: code-server-secret
+  namespace: code-server
+type: Opaque
+stringData:
+  password: "changeme"
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: code-server
+  namespace: code-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: code-server
+  template:
+    metadata:
+      labels:
+        app: code-server
+    spec:
+      initContainers:
+      - name: clone-repos
+        image: alpine/git:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          cd /repos
+          if [ ! -d "sample-app" ]; then
+            echo "Cloning sample repository..."
+            git clone https://github.com/docker/getting-started-app.git sample-app
+            chown -R 1000:1000 /repos
+            echo "Repository cloned successfully!"
+          else
+            echo "Repository already exists, skipping clone"
+          fi
+          ls -la /repos
+        volumeMounts:
+        - name: repos
+          mountPath: /repos
+      containers:
+      - name: code-server
+        image: lscr.io/linuxserver/code-server:latest
+        ports:
+        - containerPort: 8443
+        env:
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        - name: TZ
+          value: "America/New_York"
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: code-server-secret
+              key: password
+        - name: SUDO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: code-server-secret
+              key: password
+        - name: DEFAULT_WORKSPACE
+          value: "/repos"
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: repos
+          mountPath: /repos
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+      volumes:
+      - name: config
+{% if install_ceph | default(false) | bool %}
+        persistentVolumeClaim:
+          claimName: code-server-config
+{% else %}
+        hostPath:
+          path: /opt/code-server/config
+          type: DirectoryOrCreate
+{% endif %}
+      - name: repos
+{% if install_ceph | default(false) | bool %}
+        persistentVolumeClaim:
+          claimName: shared-repos
+{% else %}
+        hostPath:
+          path: /opt/code-server/repos
+          type: DirectoryOrCreate
+{% endif %}
+---
+# Service with LoadBalancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: code-server
+  namespace: code-server
+spec:
+  type: LoadBalancer
+  selector:
+    app: code-server
+  ports:
+  - port: 8443
+    targetPort: 8443
