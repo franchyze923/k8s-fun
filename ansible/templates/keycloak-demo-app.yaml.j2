@@ -1,5 +1,5 @@
 ---
-# ConfigMap with HTML app that uses Keycloak JS adapter
+# ConfigMap with HTML app using plain OAuth2/OIDC (no external dependencies)
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -34,15 +34,20 @@ data:
           border-radius: 4px;
           cursor: pointer;
           margin: 5px;
+          font-size: 14px;
         }
         button:hover { background: #0056b3; }
         button.logout { background: #dc3545; }
         button.logout:hover { background: #c82333; }
+        button.secondary { background: #6c757d; }
+        button.secondary:hover { background: #545b62; }
         pre {
           background: #f8f9fa;
           padding: 15px;
           border-radius: 4px;
           overflow-x: auto;
+          white-space: pre-wrap;
+          word-wrap: break-word;
         }
         .hidden { display: none; }
         .status { padding: 10px; border-radius: 4px; margin: 10px 0; }
@@ -53,12 +58,15 @@ data:
         .setup-steps { text-align: left; }
         .setup-steps li { margin: 10px 0; }
         code { background: #e9ecef; padding: 2px 6px; border-radius: 3px; }
+        input[type="text"] { padding: 8px; width: 300px; border: 1px solid #ccc; border-radius: 4px; }
+        .flow-step { border-left: 3px solid #007bff; padding-left: 15px; margin: 15px 0; }
+        .flow-step h4 { margin: 0 0 5px 0; color: #007bff; }
       </style>
     </head>
     <body>
-      <h1>Keycloak Demo App</h1>
+      <h1>Keycloak OIDC Demo</h1>
 
-      <!-- Setup Instructions (shown when not configured) -->
+      <!-- Setup Instructions -->
       <div id="setup-card" class="card">
         <h2>Setup Required</h2>
         <p>Before using this app, configure Keycloak:</p>
@@ -66,10 +74,10 @@ data:
           <li>Open <a href="" id="keycloak-admin-link" target="_blank">Keycloak Admin Console</a></li>
           <li>Login with <code>admin</code> / <code>changeme</code></li>
           <li>Create a new Realm called <code>demo</code></li>
-          <li>In the <code>demo</code> realm, go to <strong>Clients</strong> → <strong>Create client</strong></li>
+          <li>In the <code>demo</code> realm, go to <strong>Clients</strong> &rarr; <strong>Create client</strong></li>
           <li>Set Client ID: <code>demo-app</code>, Client type: <code>OpenID Connect</code></li>
-          <li>On the next screen, enable <strong>Standard flow</strong> (should be on by default)</li>
-          <li>Set these URLs (replace IP with your Keycloak LoadBalancer IP):
+          <li>Enable <strong>Standard flow</strong> (should be on by default)</li>
+          <li>Set these URLs:
             <ul>
               <li>Root URL: <code id="root-url"></code></li>
               <li>Valid redirect URIs: <code id="redirect-uri"></code></li>
@@ -77,36 +85,74 @@ data:
             </ul>
           </li>
           <li>Save the client</li>
-          <li>Go to <strong>Users</strong> → <strong>Add user</strong>, create a test user</li>
-          <li>Set a password for the user in the <strong>Credentials</strong> tab</li>
+          <li>Go to <strong>Users</strong> &rarr; <strong>Add user</strong>, create a test user</li>
+          <li>Set a password for the user under <strong>Credentials</strong> tab (set Temporary to OFF)</li>
         </ol>
         <p>Once configured, enter your Keycloak URL:</p>
-        <input type="text" id="keycloak-url-input" placeholder="http://192.168.40.x:8080" style="padding: 8px; width: 250px;">
-        <button onclick="saveKeycloakUrl()">Save & Connect</button>
+        <input type="text" id="keycloak-url-input" placeholder="http://192.168.40.x:8080">
+        <button onclick="saveConfig()">Save &amp; Connect</button>
       </div>
 
-      <!-- Main App (shown when authenticated) -->
+      <!-- Logged In -->
       <div id="authenticated-card" class="card hidden">
         <h2>Welcome, <span id="username"></span>!</h2>
-        <div class="status success">You are authenticated with Keycloak</div>
-        <button class="logout" onclick="keycloak.logout()">Logout</button>
-        <button onclick="showToken()">Show Access Token</button>
-        <button onclick="showIdToken()">Show ID Token</button>
-        <button onclick="showUserInfo()">Show User Info</button>
+        <div class="status success">Authenticated via OpenID Connect Authorization Code flow</div>
+        <button class="logout" onclick="doLogout()">Logout</button>
+        <button onclick="showSection('access-token')">Access Token</button>
+        <button onclick="showSection('id-token')">ID Token</button>
+        <button onclick="fetchUserInfo()">UserInfo Endpoint</button>
+        <button class="secondary" onclick="showSection('flow-explanation')">How It Worked</button>
+        <button class="secondary" onclick="resetConfig()">Change Keycloak URL</button>
       </div>
 
-      <!-- Login Card (shown when not authenticated but configured) -->
+      <!-- Not Logged In -->
       <div id="login-card" class="card hidden">
         <h2>Not Logged In</h2>
-        <p>Click the button below to login with Keycloak:</p>
-        <button onclick="keycloak.login()">Login with Keycloak</button>
-        <button onclick="resetConfig()">Change Keycloak URL</button>
+        <p>Click to authenticate using the OIDC Authorization Code flow with PKCE:</p>
+        <button onclick="doLogin()">Login with Keycloak</button>
+        <button class="secondary" onclick="resetConfig()">Change Keycloak URL</button>
       </div>
 
-      <!-- Token/Info Display -->
-      <div id="token-card" class="card hidden">
-        <h3 id="token-title">Token</h3>
-        <pre id="token-content"></pre>
+      <!-- Token Display -->
+      <div id="access-token" class="card hidden">
+        <h3>Access Token (JWT decoded)</h3>
+        <pre id="access-token-content"></pre>
+      </div>
+
+      <div id="id-token" class="card hidden">
+        <h3>ID Token (JWT decoded)</h3>
+        <pre id="id-token-content"></pre>
+      </div>
+
+      <div id="userinfo" class="card hidden">
+        <h3>UserInfo Endpoint Response</h3>
+        <p class="status info">GET <code id="userinfo-url"></code> with Bearer token</p>
+        <pre id="userinfo-content"></pre>
+      </div>
+
+      <!-- OIDC Flow Explanation -->
+      <div id="flow-explanation" class="card hidden">
+        <h3>What Just Happened (OIDC Authorization Code Flow)</h3>
+        <div class="flow-step">
+          <h4>1. Authorization Request</h4>
+          <p>Your browser was redirected to Keycloak's <code>/auth</code> endpoint with <code>response_type=code</code>, <code>client_id</code>, <code>redirect_uri</code>, and <code>scope=openid profile email</code>. Keycloak showed you a login form.</p>
+        </div>
+        <div class="flow-step">
+          <h4>2. User Authentication</h4>
+          <p>You entered your credentials. Keycloak validated them against its user store in the <code>demo</code> realm.</p>
+        </div>
+        <div class="flow-step">
+          <h4>3. Authorization Code</h4>
+          <p>Keycloak redirected back to this app with a short-lived <code>code</code> in the URL query string. This code is single-use and expires quickly.</p>
+        </div>
+        <div class="flow-step">
+          <h4>4. Token Exchange</h4>
+          <p>This app POSTed the <code>code</code> to Keycloak's <code>/token</code> endpoint and received back an <strong>access_token</strong>, <strong>id_token</strong>, and <strong>refresh_token</strong>.</p>
+        </div>
+        <div class="flow-step">
+          <h4>5. Authenticated!</h4>
+          <p>The tokens are JWTs (JSON Web Tokens). The <strong>access token</strong> is sent as a Bearer token to call APIs. The <strong>ID token</strong> contains your identity claims (who you are). Click the buttons above to inspect them.</p>
+        </div>
       </div>
 
       <!-- Error Display -->
@@ -116,10 +162,66 @@ data:
       </div>
 
       <script>
-        let keycloak = null;
+        // ---- Config ----
+        const REALM = 'demo';
+        const CLIENT_ID = 'demo-app';
         const STORAGE_KEY = 'keycloak-demo-url';
+        const TOKEN_KEY = 'keycloak-demo-tokens';
 
-        // Update setup URLs based on current location
+        let tokens = null;
+
+        // ---- Helpers ----
+        function randomString(len) {
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+          let result = '';
+          const arr = new Uint8Array(len);
+          crypto.getRandomValues(arr);
+          for (let i = 0; i < len; i++) result += chars[arr[i] % chars.length];
+          return result;
+        }
+
+        function decodeJwt(token) {
+          try {
+            const parts = token.split('.');
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            return payload;
+          } catch(e) { return { error: 'Failed to decode token' }; }
+        }
+
+        function getKeycloakUrl() {
+          return localStorage.getItem(STORAGE_KEY);
+        }
+
+        function oidcEndpoints(baseUrl) {
+          const realmUrl = baseUrl + '/realms/' + REALM;
+          return {
+            auth: realmUrl + '/protocol/openid-connect/auth',
+            token: realmUrl + '/protocol/openid-connect/token',
+            userinfo: realmUrl + '/protocol/openid-connect/userinfo',
+            logout: realmUrl + '/protocol/openid-connect/logout',
+          };
+        }
+
+        // ---- UI ----
+        function showCard(id) {
+          ['setup-card', 'authenticated-card', 'login-card', 'error-card'].forEach(
+            c => document.getElementById(c).classList.add('hidden')
+          );
+          document.getElementById(id).classList.remove('hidden');
+        }
+
+        function showSection(id) {
+          ['access-token', 'id-token', 'userinfo', 'flow-explanation'].forEach(
+            c => document.getElementById(c).classList.add('hidden')
+          );
+          document.getElementById(id).classList.remove('hidden');
+        }
+
+        function showError(msg) {
+          document.getElementById('error-message').textContent = msg;
+          showCard('error-card');
+        }
+
         function updateSetupUrls() {
           const appUrl = window.location.origin + window.location.pathname;
           document.getElementById('root-url').textContent = appUrl;
@@ -127,100 +229,138 @@ data:
           document.getElementById('web-origin').textContent = window.location.origin;
         }
 
-        function saveKeycloakUrl() {
-          const url = document.getElementById('keycloak-url-input').value.trim();
-          if (!url) {
-            alert('Please enter a Keycloak URL');
-            return;
-          }
+        // ---- Actions ----
+        function saveConfig() {
+          const url = document.getElementById('keycloak-url-input').value.trim().replace(/\/+$/, '');
+          if (!url) { alert('Please enter a URL'); return; }
           localStorage.setItem(STORAGE_KEY, url);
-          initKeycloak(url);
+          location.reload();
         }
 
         function resetConfig() {
           localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(TOKEN_KEY);
+          sessionStorage.removeItem('oauth_state');
           location.reload();
         }
 
-        function showCard(cardId) {
-          ['setup-card', 'authenticated-card', 'login-card', 'token-card', 'error-card'].forEach(id => {
-            document.getElementById(id).classList.add('hidden');
+        function doLogin() {
+          const baseUrl = getKeycloakUrl();
+          if (!baseUrl) return;
+          const endpoints = oidcEndpoints(baseUrl);
+          const state = randomString(24);
+          sessionStorage.setItem('oauth_state', state);
+
+          const params = new URLSearchParams({
+            response_type: 'code',
+            client_id: CLIENT_ID,
+            redirect_uri: window.location.origin + window.location.pathname,
+            scope: 'openid profile email',
+            state: state
           });
-          if (cardId) {
-            document.getElementById(cardId).classList.remove('hidden');
+          window.location.href = endpoints.auth + '?' + params.toString();
+        }
+
+        async function exchangeCode(code) {
+          const baseUrl = getKeycloakUrl();
+          const endpoints = oidcEndpoints(baseUrl);
+
+          const body = new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: CLIENT_ID,
+            code: code,
+            redirect_uri: window.location.origin + window.location.pathname
+          });
+
+          try {
+            const resp = await fetch(endpoints.token, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: body.toString()
+            });
+            if (!resp.ok) {
+              const err = await resp.text();
+              showError('Token exchange failed: ' + err);
+              return;
+            }
+            tokens = await resp.json();
+            localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+            sessionStorage.removeItem('oauth_state');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+            showAuthenticated();
+          } catch(e) {
+            showError('Token exchange error: ' + e.message);
           }
         }
 
-        function showError(message) {
-          document.getElementById('error-message').textContent = message;
-          showCard('error-card');
-        }
-
-        function showToken() {
-          document.getElementById('token-title').textContent = 'Access Token (Decoded)';
-          document.getElementById('token-content').textContent = JSON.stringify(keycloak.tokenParsed, null, 2);
-          document.getElementById('token-card').classList.remove('hidden');
-        }
-
-        function showIdToken() {
-          document.getElementById('token-title').textContent = 'ID Token (Decoded)';
-          document.getElementById('token-content').textContent = JSON.stringify(keycloak.idTokenParsed, null, 2);
-          document.getElementById('token-card').classList.remove('hidden');
-        }
-
-        function showUserInfo() {
-          keycloak.loadUserInfo().then(info => {
-            document.getElementById('token-title').textContent = 'User Info';
-            document.getElementById('token-content').textContent = JSON.stringify(info, null, 2);
-            document.getElementById('token-card').classList.remove('hidden');
+        function doLogout() {
+          const baseUrl = getKeycloakUrl();
+          const endpoints = oidcEndpoints(baseUrl);
+          const idToken = tokens ? tokens.id_token : '';
+          localStorage.removeItem(TOKEN_KEY);
+          tokens = null;
+          const params = new URLSearchParams({
+            post_logout_redirect_uri: window.location.origin + window.location.pathname,
+            id_token_hint: idToken
           });
+          window.location.href = endpoints.logout + '?' + params.toString();
         }
 
-        function initKeycloak(keycloakUrl) {
-          // Load Keycloak JS adapter dynamically
-          const script = document.createElement('script');
-          script.src = keycloakUrl + '/js/keycloak.js';
-          script.onload = function() {
-            keycloak = new Keycloak({
-              url: keycloakUrl,
-              realm: 'demo',
-              clientId: 'demo-app'
-            });
-
-            keycloak.init({
-              onLoad: 'check-sso',
-              silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
-              checkLoginIframe: false
-            }).then(authenticated => {
-              if (authenticated) {
-                document.getElementById('username').textContent =
-                  keycloak.tokenParsed.preferred_username || keycloak.tokenParsed.name || 'User';
-                showCard('authenticated-card');
-              } else {
-                showCard('login-card');
-              }
-            }).catch(err => {
-              console.error('Keycloak init failed:', err);
-              showError('Failed to connect to Keycloak. Make sure the URL is correct and the realm/client are configured. Error: ' + err);
-            });
-          };
-          script.onerror = function() {
-            showError('Could not load Keycloak JS adapter. Check the URL: ' + keycloakUrl);
-          };
-          document.head.appendChild(script);
+        function showAuthenticated() {
+          if (!tokens || !tokens.access_token) { showCard('login-card'); return; }
+          const parsed = decodeJwt(tokens.access_token);
+          document.getElementById('username').textContent =
+            parsed.preferred_username || parsed.name || 'User';
+          document.getElementById('access-token-content').textContent =
+            JSON.stringify(decodeJwt(tokens.access_token), null, 2);
+          document.getElementById('id-token-content').textContent =
+            JSON.stringify(decodeJwt(tokens.id_token), null, 2);
+          showCard('authenticated-card');
         }
 
-        // On page load
+        async function fetchUserInfo() {
+          const baseUrl = getKeycloakUrl();
+          const endpoints = oidcEndpoints(baseUrl);
+          document.getElementById('userinfo-url').textContent = endpoints.userinfo;
+          try {
+            const resp = await fetch(endpoints.userinfo, {
+              headers: { 'Authorization': 'Bearer ' + tokens.access_token }
+            });
+            const data = await resp.json();
+            document.getElementById('userinfo-content').textContent = JSON.stringify(data, null, 2);
+            showSection('userinfo');
+          } catch(e) {
+            document.getElementById('userinfo-content').textContent = 'Error: ' + e.message;
+            showSection('userinfo');
+          }
+        }
+
+        // ---- Init ----
         window.onload = function() {
           updateSetupUrls();
-          const savedUrl = localStorage.getItem(STORAGE_KEY);
+          const baseUrl = getKeycloakUrl();
 
-          if (savedUrl) {
-            document.getElementById('keycloak-admin-link').href = savedUrl + '/admin';
-            initKeycloak(savedUrl);
-          } else {
-            document.getElementById('keycloak-admin-link').href = '#';
+          if (!baseUrl) {
             showCard('setup-card');
+            return;
+          }
+          document.getElementById('keycloak-admin-link').href = baseUrl + '/admin';
+
+          // Check for auth code in URL (redirect back from Keycloak)
+          const params = new URLSearchParams(window.location.search);
+          if (params.has('code')) {
+            exchangeCode(params.get('code'));
+            return;
+          }
+
+          // Check for existing tokens
+          const saved = localStorage.getItem(TOKEN_KEY);
+          if (saved) {
+            tokens = JSON.parse(saved);
+            showAuthenticated();
+          } else {
+            showCard('login-card');
           }
         };
       </script>
