@@ -19,14 +19,18 @@ Automated deployment of a Kubernetes cluster on Proxmox VMs using Terraform and 
 git clone https://github.com/franchyze923/k8s-fun.git
 cd k8s-fun
 
-# Set your Proxmox credentials
+# Copy config templates
+cp config.yml.example config.yml
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# Edit terraform/terraform.tfvars with your password and SSH key
+
+# Edit with your values
+# - config.yml: IPs, cluster settings, app toggles
+# - terraform/terraform.tfvars: Proxmox password and SSH key
 ```
 
 ### 2. Edit config.yml
 
-All deployment settings are in `config.yml`:
+All deployment settings are in `config.yml` (gitignored for security):
 
 ```yaml
 proxmox:
@@ -89,6 +93,8 @@ Edit `config.yml` to configure your deployment. All settings in one place:
 | `networking` | loadbalancer, lb_ip_start, lb_ip_end |
 | `storage` | ceph_enabled, ceph_disk_size |
 | `apps` | dashboard, demo_apps, argocd, keycloak, code_server |
+| `argocd` | repo_url, path, branch, app_name |
+| `backup` | enabled, local_mount, path, nfs_server, nfs_share |
 
 ### CLI Overrides
 
@@ -144,13 +150,30 @@ networking:
 ./destroy.sh --cluster k8s2     # Destroys specific cluster
 ```
 
+## Backup
+
+Deployment artifacts (kubeconfig, credentials, config) are automatically saved to `./deployments/` after each deploy.
+
+To also copy to a NAS/NFS share, configure in `config.yml`:
+
+```yaml
+backup:
+  enabled: true
+  local_mount: "/Volumes/MyNAS"     # If already mounted
+  path: "k8s_deployments"           # Subfolder on the share
+  nfs_server: "192.168.x.x"         # Fallback: mount NFS if local_mount unavailable
+  nfs_share: "/mnt/share"
+```
+
 ## File Structure
 
 ```
 .
-├── config.yml            # All deployment settings
+├── config.yml.example    # Template config (copy to config.yml)
+├── config.yml            # Your settings (git-ignored)
 ├── deploy.sh             # Main deployment script
 ├── destroy.sh            # Cleanup script
+├── deployments/          # Backup artifacts (git-ignored)
 ├── terraform/
 │   ├── main.tf           # VM definitions
 │   ├── variables.tf      # Variable definitions
