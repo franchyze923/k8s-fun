@@ -98,6 +98,12 @@ variable "rocky_image_url" {
   default     = "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
 }
 
+variable "skip_image_download" {
+  description = "Skip downloading the cloud image (use if image already exists on Proxmox)"
+  type        = bool
+  default     = false
+}
+
 variable "template_vmid" {
   description = "VM ID for the cloud-init template"
   type        = number

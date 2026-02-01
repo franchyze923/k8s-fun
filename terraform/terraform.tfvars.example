@@ -1,19 +1,8 @@
-# Proxmox connection
-proxmox_host     = "192.168.1.100"
-proxmox_user     = "root@pam"
-proxmox_password = "your-password-here"
+# Proxmox Credentials (sensitive - keep in terraform.tfvars, not config.yml)
+# Copy this to terraform.tfvars and fill in your values
 
-# Target node in Proxmox
-proxmox_node = "pve"
+proxmox_password = "your-proxmox-password"
+ssh_public_key   = "ssh-rsa AAAA... your-public-key"
 
-# SSH public key for VM access
-ssh_public_key = "ssh-rsa AAAA... your-key-here"
-
-# VM settings
-vm_count        = 3
-vm_memory       = 4096
-vm_cores        = 2
-vm_disk_size    = 32
-ceph_disk_size  = 20
-vm_storage      = "local-lvm"
-vm_name_prefix  = "k8s"
+# Optional: cloud-init password (default: changeme123)
+# ci_password = "your-vm-password"

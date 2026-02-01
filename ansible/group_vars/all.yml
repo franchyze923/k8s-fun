@@ -7,6 +7,12 @@ k8s_distro: k3s
 # Override with: ansible-playbook -e lb_implementation=metallb
 lb_implementation: cilium
 
+# LoadBalancer IP range (change these for multiple clusters)
+# Cluster 1 default: 192.168.40.200-220
+# Cluster 2 example: 192.168.40.221-240
+lb_ip_start: "192.168.40.200"
+lb_ip_end: "192.168.40.220"
+
 # Derived paths based on distro
 kubectl_bin: "{{ '/usr/local/bin/k3s kubectl' if k8s_distro == 'k3s' else 'kubectl' }}"
 kubeconfig_path: "{{ '/etc/rancher/k3s/k3s.yaml' if k8s_distro == 'k3s' else '/etc/kubernetes/admin.conf' }}"

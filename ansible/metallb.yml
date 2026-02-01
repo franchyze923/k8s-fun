@@ -71,7 +71,7 @@
             namespace: metallb-system
           spec:
             addresses:
-            - 192.168.40.200-192.168.40.220
+            - {{ lb_ip_start }}-{{ lb_ip_end }}
 
     - name: Apply MetalLB IPAddressPool
       ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/metallb-ippool.yaml"
@@ -95,7 +95,7 @@
           - "MetalLB LoadBalancer configured!"
           - "=========================================="
           - ""
-          - "IP Pool: 192.168.40.200 - 192.168.40.220"
+          - "IP Pool: {{ lb_ip_start }} - {{ lb_ip_end }}"
           - ""
           - "To use LoadBalancer, create a service with:"
           - "  spec:"

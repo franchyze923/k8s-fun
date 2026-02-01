@@ -1,11 +1,17 @@
-# Download Rocky Linux cloud image
+# Download Rocky Linux cloud image (skipped if image already exists)
 resource "proxmox_virtual_environment_download_file" "rocky_cloud_image" {
+  count        = var.skip_image_download ? 0 : 1
   content_type = "iso"
   datastore_id = "local"
   node_name    = var.proxmox_node
   url          = var.rocky_image_url
   file_name    = "rocky-9-cloud.img"
   overwrite    = false
+}
+
+# Local for image ID - use existing or downloaded
+locals {
+  cloud_image_id = var.skip_image_download ? "local:iso/rocky-9-cloud.img" : proxmox_virtual_environment_download_file.rocky_cloud_image[0].id
 }
 
 # Create VMs
@@ -38,7 +44,7 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   # OS disk from cloud image
   disk {
     datastore_id = var.vm_storage
-    file_id      = proxmox_virtual_environment_download_file.rocky_cloud_image.id
+    file_id      = local.cloud_image_id
     interface    = "scsi0"
     size         = tonumber(replace(var.vm_disk_size, "G", ""))
     discard      = "on"

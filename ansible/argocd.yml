@@ -61,6 +61,36 @@
       delegate_to: localhost
       become: false
 
+    - name: Create App of Apps Application
+      ansible.builtin.copy:
+        dest: /tmp/argocd-app-of-apps.yaml
+        mode: '0644'
+        content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: {{ argocd_app_name | default('app-of-apps') }}
+            namespace: argocd
+          spec:
+            project: default
+            source:
+              repoURL: {{ argocd_repo_url | default('https://github.com/franchyze923/app-of-apps-demo.git') }}
+              targetRevision: {{ argocd_branch | default('main') }}
+              path: {{ argocd_path | default('.') }}
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: argocd
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+
+    - name: Apply App of Apps
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/argocd-app-of-apps.yaml"
+      changed_when: true
+
     - name: Display access instructions
       ansible.builtin.debug:
         msg:
@@ -73,6 +103,11 @@
           - ""
           - "Username: admin"
           - "Password: {{ argocd_password.stdout }}"
+          - ""
+          - "App of Apps configured:"
+          - "  Repo: {{ argocd_repo_url | default('https://github.com/franchyze923/app-of-apps-demo.git') }}"
+          - "  Path: {{ argocd_path | default('.') }}"
+          - "  Branch: {{ argocd_branch | default('main') }}"
           - ""
           - "Credentials saved to: argocd-credentials.txt"
           - ""

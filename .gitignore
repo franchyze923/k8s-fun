@@ -16,6 +16,8 @@ ansible/inventory.ini
 # Deployment state
 .k8s-distro
 .lb-implementation
+.cluster-name
+.vm-id-start
 
 # Old unused files
 config.env
@@ -24,3 +26,6 @@ config.env
 .DS_Store
 argocd-credentials.txt
 keycloak-credentials.txt
+
+# Deployment artifact backups
+deployments/

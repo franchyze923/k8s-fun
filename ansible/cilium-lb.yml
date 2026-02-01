@@ -39,8 +39,8 @@
             name: lb-pool
           spec:
             blocks:
-            - start: "192.168.40.200"
-              stop: "192.168.40.220"
+            - start: "{{ lb_ip_start }}"
+              stop: "{{ lb_ip_end }}"
 
     - name: Apply LoadBalancer IP pool
       ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/cilium-lb-pool.yaml"
@@ -64,7 +64,7 @@
           - "Cilium L2 LoadBalancer configured!"
           - "=========================================="
           - ""
-          - "IP Pool: 192.168.40.200 - 192.168.40.220"
+          - "IP Pool: {{ lb_ip_start }} - {{ lb_ip_end }}"
           - ""
           - "To use LoadBalancer, create a service with:"
           - "  spec:"
