@@ -1,22 +1,22 @@
 # Unified configuration for k8s deployment
-# This file configures both Terraform (infrastructure) and Ansible (software)
+# Copy this file to config.yml and fill in your values
 # Sensitive credentials (passwords, SSH keys) should remain in terraform/terraform.tfvars
 
 # =============================================================================
 # Proxmox Settings
 # =============================================================================
 proxmox:
-  host: "192.168.40.10"
-  user: "root@pam"
-  node: "pve"
-  storage: "speedy-nvme-drive"
-  network_bridge: "vmbr0"
+  host: "192.168.x.x"            # Proxmox server IP
+  user: "root@pam"               # Proxmox username
+  node: "pve"                    # Proxmox node name
+  storage: "local-lvm"           # Storage pool for VMs
+  network_bridge: "vmbr0"        # Network bridge
 
 # =============================================================================
 # Cluster Settings
 # =============================================================================
 cluster:
-  name: "k8s-from-mac-mini"      # VM name prefix (k8s-master, k8s-worker-1, etc.)
+  name: "k8s"                    # VM name prefix (k8s-master, k8s-worker-1, etc.)
   vm_id_start: 200               # Starting Proxmox VM ID
   node_count: 3                  # Total nodes (1 master + N-1 workers)
 
@@ -40,8 +40,8 @@ vm:
 # =============================================================================
 networking:
   loadbalancer: "cilium"         # cilium or metallb
-  lb_ip_start: "192.168.40.200"  # LoadBalancer IP pool start
-  lb_ip_end: "192.168.40.220"    # LoadBalancer IP pool end
+  lb_ip_start: "192.168.x.200"   # LoadBalancer IP pool start
+  lb_ip_end: "192.168.x.220"     # LoadBalancer IP pool end
 
 # =============================================================================
 # Storage (Optional)
@@ -64,8 +64,8 @@ apps:
 # ArgoCD Configuration
 # =============================================================================
 argocd:
-  repo_url: "https://github.com/franchyze923/app-of-apps-demo.git"
-  path: "./apps"                 # Path in repo to watch
+  repo_url: "https://github.com/your-username/your-repo.git"
+  path: "."                      # Path in repo to watch
   branch: "main"                 # Branch to track
   app_name: "app-of-apps"        # Name of the root application
 
@@ -73,11 +73,11 @@ argocd:
 # Backup/Archive Settings
 # =============================================================================
 backup:
-  enabled: true
+  enabled: false
   # If share is already mounted locally, use this path directly
-  local_mount: "/Volumes/FranData"
+  local_mount: "/path/to/mount"
   # Path within the mount for deployment artifacts
-  path: "FranArchives/k8s_deployment_data"
+  path: "k8s_deployments"
   # NFS settings (used only if local_mount doesn't exist)
-  nfs_server: "192.168.40.116"
-  nfs_share: "/mnt/user/FranData"
+  nfs_server: "192.168.x.x"
+  nfs_share: "/mnt/share"
