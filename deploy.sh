@@ -53,7 +53,6 @@ APP_DASHBOARD=$(get_config "dashboard" "true")
 APP_DEMO=$(get_config "demo_apps" "true")
 APP_ARGOCD=$(get_config "argocd" "true")
 APP_KEYCLOAK=$(get_config "keycloak" "true")
-APP_CODESERVER=$(get_config "code_server" "true")
 
 # ArgoCD configuration
 ARGOCD_REPO_URL=$(get_config "repo_url" "https://github.com/franchyze923/app-of-apps-demo.git")
@@ -64,7 +63,7 @@ ARGOCD_APP_NAME=$(get_config "app_name" "app-of-apps")
 # Backup configuration
 BACKUP_ENABLED=$(get_config "enabled" "false")
 BACKUP_LOCAL_MOUNT=$(get_config "local_mount" "")
-BACKUP_PATH=$(get_config "path" "")
+BACKUP_PATH=$(get_config "backup_path" "")
 NFS_SERVER=$(get_config "nfs_server" "")
 NFS_SHARE=$(get_config "nfs_share" "")
 
@@ -314,11 +313,6 @@ if [ "$APP_KEYCLOAK" = "true" ]; then
     ansible-playbook $ANSIBLE_EXTRA keycloak-demo-app.yml
 fi
 
-if [ "$APP_CODESERVER" = "true" ]; then
-    echo "Deploying Code-Server..."
-    ansible-playbook $ANSIBLE_EXTRA code-server.yml
-fi
-
 cd ..
 
 # =============================================================================
@@ -342,8 +336,8 @@ echo "  export KUBECONFIG=$(pwd)/kubeconfig"
 echo ""
 echo "Services:"
 [ "$APP_DASHBOARD" = "true" ] && echo "  Dashboard:    https://${MASTER_IP}:30443"
-[ "$APP_DEMO" = "true" ] && echo "  Demo App 1:   http://${DEMO_LB_IP}"
-[ "$APP_DEMO" = "true" ] && echo "  Demo App 2:   http://${DEMO2_LB_IP}"
+[ "$APP_DEMO" = "true" ] && echo "  Demo App 1:   http://${DEMO_LB_IP}:8081"
+[ "$APP_DEMO" = "true" ] && echo "  Demo App 2:   http://${DEMO2_LB_IP}:8082"
 [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://${ARGOCD_LB_IP}  (see argocd-credentials.txt)"
 [ "$APP_KEYCLOAK" = "true" ] && echo "  Keycloak:     http://${KEYCLOAK_LB_IP}:8080  (see keycloak-credentials.txt)"
 [ "$INSTALL_CEPH" = true ] && echo "  S3 Endpoint:  See s3-credentials.txt"
@@ -408,10 +402,14 @@ done)
 
 Services:
   Dashboard: https://${MASTER_IP}:30443
-  Demo App 1: http://${DEMO_LB_IP}
-  Demo App 2: http://${DEMO2_LB_IP}
+  Demo App 1: http://${DEMO_LB_IP}:8081
+  Demo App 2: http://${DEMO2_LB_IP}:8082
   Argo CD: https://${ARGOCD_LB_IP}
   Keycloak: http://${KEYCLOAK_LB_IP}:8080
+
+Shared IP Groups (Cilium lb-ipam-sharing-key):
+  Platform: ArgoCD (:80/:443), Keycloak (:8080), Keycloak Demo (:8086), Headlamp (:4466), Grafana (:3000), Prometheus (:9090), Kibana (:5601)
+  Apps: Demo1 (:8081), Demo2 (:8082), Hello-A (:8083), Hello-B (:8084), Hello-C (:8085), Gitea (:3000/:22), B0k3ts (:8088/:8089)
 SUMMARY_EOF
 
 echo "Artifacts saved locally to: $LOCAL_BACKUP_DIR"

@@ -19,8 +19,12 @@
         force: true
 
     - name: Deploy Rook CRDs
-      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/rook/deploy/examples/crds.yaml"
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply --server-side -f /tmp/rook/deploy/examples/crds.yaml --timeout=300s"
       changed_when: true
+      retries: 3
+      delay: 10
+      register: crd_result
+      until: crd_result.rc == 0
 
     - name: Deploy Rook common resources
       ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/rook/deploy/examples/common.yaml"
@@ -158,6 +162,13 @@
     - name: Deploy StorageClass
       ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f /tmp/ceph-storageclass.yaml"
       changed_when: true
+
+    - name: Remove default annotation from local-path StorageClass
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} patch storageclass local-path
+        -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+      changed_when: true
+      ignore_errors: true
 
     - name: Get storage classes
       ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} get sc"

@@ -409,10 +409,13 @@ kind: Service
 metadata:
   name: keycloak-demo-app
   namespace: keycloak
+  annotations:
+    lbipam.cilium.io/sharing-key: "platform"
+    lbipam.cilium.io/sharing-cross-namespace: "*"
 spec:
   type: LoadBalancer
   selector:
     app: keycloak-demo-app
   ports:
-  - port: 80
+  - port: 8086
     targetPort: 80

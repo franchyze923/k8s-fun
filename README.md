@@ -92,7 +92,7 @@ Edit `config.yml` to configure your deployment. All settings in one place:
 | `vm` | memory, cores, disk_size |
 | `networking` | loadbalancer, lb_ip_start, lb_ip_end |
 | `storage` | ceph_enabled, ceph_disk_size |
-| `apps` | dashboard, demo_apps, argocd, keycloak, code_server |
+| `apps` | dashboard, demo_apps, argocd, keycloak |
 | `argocd` | repo_url, path, branch, app_name |
 | `backup` | enabled, local_mount, path, nfs_server, nfs_share |
 
@@ -187,7 +187,6 @@ backup:
     ├── dashboard.yml     # Kubernetes Dashboard
     ├── argocd.yml        # Argo CD
     ├── keycloak.yml      # Keycloak
-    ├── code-server.yml   # VS Code in browser
     └── ...
 ```
 

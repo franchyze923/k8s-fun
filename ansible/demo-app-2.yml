@@ -101,12 +101,15 @@
           metadata:
             name: nginx
             namespace: demo2
+            annotations:
+              lbipam.cilium.io/sharing-key: "apps"
+              lbipam.cilium.io/sharing-cross-namespace: "*"
           spec:
             type: LoadBalancer
             selector:
               app: nginx
             ports:
-            - port: 80
+            - port: 8082
               targetPort: 80
 
     - name: Deploy second demo app

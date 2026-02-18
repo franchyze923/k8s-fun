@@ -21,15 +21,15 @@
     - name: Install Cilium with CNI settings
       ansible.builtin.shell: |
         export KUBECONFIG={{ kubeconfig_path }}
-        /usr/local/bin/cilium install --version 1.16.0 \
+        /usr/local/bin/cilium install --version 1.19.1 \
           --set k8sServiceHost={{ ansible_host }} \
           --set k8sServicePort=6443 \
           --set operator.replicas=1 \
           {% if lb_implementation == 'cilium' %}--set l2announcements.enabled=true \
           --set externalIPs.enabled=true \
+          --set kubeProxyReplacement=true \
           {% endif %}--set k8sClientRateLimit.qps=50 \
-          --set k8sClientRateLimit.burst=100 \
-          {% if k8s_distro == 'kubeadm' %}--set kubeProxyReplacement=true{% endif %}
+          --set k8sClientRateLimit.burst=100
       register: cilium_install
       changed_when: "'Cilium was successfully installed' in cilium_install.stdout"
       failed_when: cilium_install.rc != 0 and 're-use a name' not in cilium_install.stderr and 'already installed' not in cilium_install.stderr

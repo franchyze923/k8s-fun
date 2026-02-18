@@ -58,7 +58,6 @@ apps:
   demo_apps: true                # Demo nginx applications
   argocd: true                   # Argo CD GitOps
   keycloak: true                 # Keycloak IAM
-  code_server: true              # VS Code in browser
 
 # =============================================================================
 # ArgoCD Configuration
@@ -77,7 +76,7 @@ backup:
   # If share is already mounted locally, use this path directly
   local_mount: "/path/to/mount"
   # Path within the mount for deployment artifacts
-  path: "k8s_deployments"
+  backup_path: "k8s_deployments"
   # NFS settings (used only if local_mount doesn't exist)
   nfs_server: "192.168.x.x"
   nfs_share: "/mnt/share"

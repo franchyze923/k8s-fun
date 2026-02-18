@@ -16,7 +16,7 @@
 
     - name: Install Argo CD
       ansible.builtin.command: >
-        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -n argocd
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -n argocd --server-side
         -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
       changed_when: true
 
@@ -29,10 +29,10 @@
       register: result
       until: result.rc == 0
 
-    - name: Patch argocd-server service to LoadBalancer
+    - name: Patch argocd-server service to LoadBalancer with shared IP
       ansible.builtin.command: >
         {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n argocd patch svc argocd-server
-        -p '{"spec": {"type": "LoadBalancer"}}'
+        -p '{"metadata": {"annotations": {"lbipam.cilium.io/sharing-key": "platform", "lbipam.cilium.io/sharing-cross-namespace": "*"}}, "spec": {"type": "LoadBalancer"}}'
       changed_when: true
 
     - name: Get LoadBalancer IP
