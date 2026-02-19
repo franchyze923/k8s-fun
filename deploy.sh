@@ -52,7 +52,6 @@ PROXMOX_BRIDGE=$(get_config "network_bridge" "vmbr0")
 APP_DASHBOARD=$(get_config "dashboard" "true")
 APP_DEMO=$(get_config "demo_apps" "true")
 APP_ARGOCD=$(get_config "argocd" "true")
-APP_KEYCLOAK=$(get_config "keycloak" "true")
 
 # ArgoCD configuration
 ARGOCD_REPO_URL=$(get_config "repo_url" "https://github.com/franchyze923/app-of-apps-demo.git")
@@ -274,6 +273,9 @@ else
     ansible-playbook $ANSIBLE_EXTRA metallb.yml
 fi
 
+echo "Installing Metrics Server..."
+ansible-playbook $ANSIBLE_EXTRA metrics-server.yml
+
 # Ceph storage
 if [ "$INSTALL_CEPH" = true ]; then
     echo "Installing Rook-Ceph..."
@@ -307,12 +309,6 @@ if [ "$APP_ARGOCD" = "true" ]; then
         argocd.yml
 fi
 
-if [ "$APP_KEYCLOAK" = "true" ]; then
-    echo "Deploying Keycloak..."
-    ansible-playbook $ANSIBLE_EXTRA keycloak.yml
-    ansible-playbook $ANSIBLE_EXTRA keycloak-demo-app.yml
-fi
-
 cd ..
 
 # =============================================================================
@@ -324,7 +320,6 @@ export KUBECONFIG=$(pwd)/kubeconfig
 DEMO_LB_IP=$(kubectl -n demo get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 DEMO2_LB_IP=$(kubectl -n demo2 get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 ARGOCD_LB_IP=$(kubectl -n argocd get svc argocd-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
-KEYCLOAK_LB_IP=$(kubectl -n keycloak get svc keycloak -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 
 echo ""
 echo "=== Deployment complete ==="
@@ -339,7 +334,6 @@ echo "Services:"
 [ "$APP_DEMO" = "true" ] && echo "  Demo App 1:   http://${DEMO_LB_IP}:8081"
 [ "$APP_DEMO" = "true" ] && echo "  Demo App 2:   http://${DEMO2_LB_IP}:8082"
 [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://${ARGOCD_LB_IP}  (see argocd-credentials.txt)"
-[ "$APP_KEYCLOAK" = "true" ] && echo "  Keycloak:     http://${KEYCLOAK_LB_IP}:8080  (see keycloak-credentials.txt)"
 [ "$INSTALL_CEPH" = true ] && echo "  S3 Endpoint:  See s3-credentials.txt"
 echo ""
 echo "Nodes:"
@@ -370,7 +364,6 @@ echo "Collecting deployment artifacts..."
 
 # Credential files
 [ -f "argocd-credentials.txt" ] && cp argocd-credentials.txt "$LOCAL_BACKUP_DIR/"
-[ -f "keycloak-credentials.txt" ] && cp keycloak-credentials.txt "$LOCAL_BACKUP_DIR/"
 [ -f "s3-credentials.txt" ] && cp s3-credentials.txt "$LOCAL_BACKUP_DIR/"
 [ -f "dashboard-token.txt" ] && cp dashboard-token.txt "$LOCAL_BACKUP_DIR/"
 
@@ -405,10 +398,9 @@ Services:
   Demo App 1: http://${DEMO_LB_IP}:8081
   Demo App 2: http://${DEMO2_LB_IP}:8082
   Argo CD: https://${ARGOCD_LB_IP}
-  Keycloak: http://${KEYCLOAK_LB_IP}:8080
 
 Shared IP Groups (Cilium lb-ipam-sharing-key):
-  Platform: ArgoCD (:80/:443), Keycloak (:8080), Keycloak Demo (:8086), Headlamp (:4466), Grafana (:3000), Prometheus (:9090), Kibana (:5601)
+  Platform: ArgoCD (:80/:443), Keycloak (:8080), Headlamp (:4466), Grafana (:3000), Prometheus (:9090), Kibana (:5601)
   Apps: Demo1 (:8081), Demo2 (:8082), Hello-A (:8083), Hello-B (:8084), Hello-C (:8085), Gitea (:3000/:22), B0k3ts (:8088/:8089)
 SUMMARY_EOF
 

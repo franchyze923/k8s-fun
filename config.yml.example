@@ -56,8 +56,7 @@ storage:
 apps:
   dashboard: true                # Kubernetes Dashboard
   demo_apps: true                # Demo nginx applications
-  argocd: true                   # Argo CD GitOps
-  keycloak: true                 # Keycloak IAM
+  argocd: true                   # Argo CD GitOps (deploys apps from app-of-apps repo, including Keycloak)
 
 # =============================================================================
 # ArgoCD Configuration
