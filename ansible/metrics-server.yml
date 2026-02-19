@@ -1,0 +1,40 @@
+---
+# Metrics Server Installation Playbook
+
+- name: Deploy Metrics Server
+  hosts: master
+  tasks:
+    - name: Deploy metrics-server from official manifest
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} apply -f
+        https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+      changed_when: true
+
+    - name: Patch metrics-server to allow kubelet insecure TLS (required for kubeadm)
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n kube-system patch deployment metrics-server
+        --type=json -p '[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"},
+        {"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname"}]'
+      changed_when: true
+
+    - name: Wait for metrics-server to be ready
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n kube-system wait
+        --for=condition=Available deployment/metrics-server
+        --timeout=120s
+      changed_when: false
+      retries: 3
+      delay: 10
+      register: result
+      until: result.rc == 0
+
+    - name: Display metrics-server status
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Metrics Server installed!"
+          - "=========================================="
+          - ""
+          - "Run 'kubectl top nodes' and 'kubectl top pods' to view metrics."
+          - ""
+          - "=========================================="
