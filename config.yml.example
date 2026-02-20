@@ -68,6 +68,17 @@ argocd:
   app_name: "app-of-apps"        # Name of the root application
 
 # =============================================================================
+# TLS / Ingress Settings (optional)
+# Enables nginx ingress controller + cert-manager + Let's Encrypt wildcard cert
+# Requires a Cloudflare-managed domain and API token with Zone:DNS:Edit permission
+# =============================================================================
+tls:
+  tls_enabled: false
+  domain: "yourdomain.com"              # Your domain (cert issued for *.domain)
+  acme_email: "you@yourdomain.com"      # Let's Encrypt registration email
+  cloudflare_api_token: ""              # Cloudflare API token (Zone:DNS:Edit)
+
+# =============================================================================
 # Backup/Archive Settings
 # =============================================================================
 backup:

@@ -30,3 +30,6 @@ keycloak-credentials.txt
 
 # Deployment artifact backups
 deployments/
+
+# TLS certs (contains private keys)
+tls-certs/

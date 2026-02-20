@@ -59,6 +59,12 @@ ARGOCD_PATH=$(get_config "path" ".")
 ARGOCD_BRANCH=$(get_config "branch" "main")
 ARGOCD_APP_NAME=$(get_config "app_name" "app-of-apps")
 
+# TLS configuration
+TLS_ENABLED=$(get_config "tls_enabled" "false")
+DOMAIN=$(get_config "domain" "")
+ACME_EMAIL=$(get_config "acme_email" "")
+CLOUDFLARE_API_TOKEN=$(get_config "cloudflare_api_token" "")
+
 # Backup configuration
 BACKUP_ENABLED=$(get_config "enabled" "false")
 BACKUP_LOCAL_MOUNT=$(get_config "local_mount" "")
@@ -312,6 +318,253 @@ fi
 cd ..
 
 # =============================================================================
+# TLS Setup (nginx ingress + cert-manager + Let's Encrypt wildcard cert)
+# =============================================================================
+if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$ACME_EMAIL" ]; then
+    echo "=== Setting up TLS ==="
+    export KUBECONFIG="$(pwd)/kubeconfig"
+
+    # --- nginx ingress controller ---
+    echo "Installing nginx ingress controller..."
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0/deploy/static/provider/cloud/deploy.yaml
+    kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
+
+    # externalTrafficPolicy must be Cluster for Cilium LB IPAM to route correctly
+    # (Local only forwards on the node where the pod runs, causing timeouts when
+    #  the L2-announcing node differs from the pod node)
+    kubectl patch svc ingress-nginx-controller -n ingress-nginx \
+        --type='json' -p='[{"op":"replace","path":"/spec/externalTrafficPolicy","value":"Cluster"}]'
+
+    echo "Waiting for ingress controller LoadBalancer IP..."
+    for i in $(seq 1 30); do
+        INGRESS_IP=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+        if [ -n "$INGRESS_IP" ]; then
+            echo "Ingress controller IP: $INGRESS_IP"
+            break
+        fi
+        sleep 5
+    done
+
+    # --- CoreDNS: use public upstream so cert-manager DNS-01 checks work ---
+    # (cluster nodes may use a local DNS that has stale NS records during migration)
+    kubectl patch configmap coredns -n kube-system --type merge -p \
+        '{"data":{"Corefile":".:53 {\n    errors\n    health {\n       lameduck 5s\n    }\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n       pods insecure\n       fallthrough in-addr.arpa ip6.arpa\n       ttl 30\n    }\n    prometheus :9153\n    forward . 1.1.1.1 8.8.8.8 {\n       max_concurrent 1000\n    }\n    cache 30 {\n       disable success cluster.local\n       disable denial cluster.local\n    }\n    loop\n    reload\n    loadbalance\n}\n"}}'
+    kubectl rollout restart deployment/coredns -n kube-system
+    kubectl rollout status deployment/coredns -n kube-system --timeout=180s
+
+    # --- cert-manager ---
+    echo "Installing cert-manager..."
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.0/cert-manager.yaml
+    kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
+    kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+
+    # Webhook needs extra time after rollout to complete internal TLS setup before
+    # the API server can call it (kubeadm + Cilium race condition)
+    echo "Waiting for cert-manager webhook to fully initialize..."
+    sleep 30
+
+    # --- Cloudflare API token secret ---
+    kubectl create secret generic cloudflare-api-token \
+        --from-literal=api-token="$CLOUDFLARE_API_TOKEN" \
+        -n cert-manager --dry-run=client -o yaml | kubectl apply -f -
+
+    # --- ClusterIssuer (Let's Encrypt via Cloudflare DNS-01) ---
+    # Retry in case the webhook isn't fully ready yet
+    for attempt in 1 2 3; do
+        if kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: ${ACME_EMAIL}
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cloudflare-api-token
+            key: api-token
+EOF
+        then
+            break
+        fi
+        echo "Webhook not ready, retrying in 15s... ($attempt/3)"
+        sleep 15
+    done
+
+    # --- Wildcard certificate ---
+    CERT_BACKUP_FILE="tls-certs/wildcard-tls-secret.json"
+
+    if [ -f "$CERT_BACKUP_FILE" ]; then
+        # Pre-load the saved secret BEFORE creating the Certificate resource.
+        # cert-manager checks annotations on the secret to identify the issuer —
+        # if the secret already exists with matching annotations when the Certificate
+        # is created, cert-manager marks it Ready immediately without ACME issuance.
+        echo "Found saved TLS certificate, pre-loading secret..."
+        kubectl apply -f "$CERT_BACKUP_FILE"
+
+        kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: franpolignano-wildcard
+  namespace: ingress-nginx
+spec:
+  secretName: franpolignano-wildcard-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - "*.${DOMAIN}"
+  - "${DOMAIN}"
+EOF
+
+        echo "Waiting for cert-manager to recognize existing certificate (up to 60s)..."
+        CERT_READY=""
+        for i in $(seq 1 12); do
+            CERT_READY=$(kubectl get certificate franpolignano-wildcard -n ingress-nginx \
+                -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            if [ "$CERT_READY" = "True" ]; then
+                echo "Certificate ready."
+                break
+            fi
+            sleep 5
+        done
+
+        if [ "$CERT_READY" != "True" ]; then
+            echo "Warning: cert-manager did not mark cert Ready within 60s."
+            echo "The saved cert may be expired. Delete $CERT_BACKUP_FILE to force re-issuance."
+            # Don't exit — the secret is applied and ingress will work even if cert-manager
+            # hasn't caught up yet. It will re-issue automatically if the cert is expired.
+        fi
+    else
+        # No saved cert — full ACME flow via Let's Encrypt
+        echo "No saved certificate found, requesting from Let's Encrypt..."
+        echo "Waiting for wildcard certificate to be issued (this may take up to 10 minutes)..."
+        CERT_READY=""
+        for i in $(seq 1 120); do
+            CERT_READY=$(kubectl get certificate franpolignano-wildcard -n ingress-nginx \
+                -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            if [ "$CERT_READY" = "True" ]; then
+                echo "Wildcard certificate issued successfully."
+                break
+            fi
+            echo "  [$i/120] Not ready yet... ($(( i * 5 ))s elapsed)"
+            sleep 5
+        done
+
+        if [ "$CERT_READY" != "True" ]; then
+            echo ""
+            echo "ERROR: Wildcard certificate was not issued within 10 minutes."
+            echo "Check cert-manager logs for details:"
+            echo "  kubectl describe certificate franpolignano-wildcard -n ingress-nginx"
+            echo "  kubectl describe certificaterequest -n ingress-nginx"
+            echo "  kubectl logs -n cert-manager deploy/cert-manager | tail -50"
+            exit 1
+        fi
+
+        # Wait for the TLS secret itself to exist (cert-manager creates it after issuance)
+        echo "Waiting for TLS secret to be available..."
+        kubectl wait secret/franpolignano-wildcard-tls -n ingress-nginx \
+            --for=jsonpath='{.type}'=kubernetes.io/tls --timeout=60s
+
+        # Save cert for future deploys (avoids ACME re-issuance and Cloudflare cleanup issues)
+        echo "Saving TLS certificate for future deploys..."
+        mkdir -p tls-certs
+        kubectl get secret franpolignano-wildcard-tls -n ingress-nginx -o json \
+            | python3 -c "
+import json,sys
+s=json.load(sys.stdin)
+for k in ['resourceVersion','uid','creationTimestamp']:
+    s['metadata'].pop(k,None)
+s['metadata'].pop('managedFields',None)
+# Keep cert-manager annotations (needed to avoid re-issuance on restore)
+annotations = s['metadata'].get('annotations', {})
+annotations = {k:v for k,v in annotations.items() if k.startswith('cert-manager.io/')}
+# Add issuer annotations so cert-manager recognises the secret matches the ClusterIssuer.
+# Without these, cert-manager sees IncorrectIssuer and triggers a full ACME re-issuance.
+annotations['cert-manager.io/issuer-name'] = 'letsencrypt-prod'
+annotations['cert-manager.io/issuer-kind'] = 'ClusterIssuer'
+annotations['cert-manager.io/issuer-group'] = 'cert-manager.io'
+s['metadata']['annotations'] = annotations
+print(json.dumps(s,indent=2))" > "$CERT_BACKUP_FILE"
+        echo "Certificate saved to $CERT_BACKUP_FILE (valid 90 days, auto-renewed by cert-manager)"
+    fi
+
+    # --- ArgoCD: insecure mode + ingress ---
+    if [ "$APP_ARGOCD" = "true" ]; then
+        echo "Configuring ArgoCD for ingress TLS..."
+
+        # Run ArgoCD in HTTP mode — TLS is terminated by nginx ingress
+        kubectl patch configmap argocd-cmd-params-cm -n argocd \
+            --type merge -p '{"data":{"server.insecure":"true"}}'
+        kubectl rollout restart deployment/argocd-server -n argocd
+        kubectl rollout status deployment/argocd-server -n argocd --timeout=60s
+
+        # Change argocd-server to ClusterIP (ingress handles external access)
+        kubectl patch svc argocd-server -n argocd \
+            --type='json' -p='[
+              {"op":"replace","path":"/spec/type","value":"ClusterIP"},
+              {"op":"remove","path":"/spec/externalTrafficPolicy"}
+            ]'
+
+        # Copy wildcard cert into argocd namespace for the ingress to use
+        kubectl get secret franpolignano-wildcard-tls -n ingress-nginx -o json \
+            | python3 -c "
+import json,sys
+s=json.load(sys.stdin)
+for k in ['namespace','resourceVersion','uid','creationTimestamp']:
+    s['metadata'].pop(k,None)
+s['metadata'].pop('annotations',None)
+s['metadata'].pop('managedFields',None)
+s['metadata']['namespace']='argocd'
+print(json.dumps(s))" \
+            | kubectl apply -f -
+
+        # Create ArgoCD ingress
+        kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-ingress
+  namespace: argocd
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: argocd.${DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: argocd-server
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - argocd.${DOMAIN}
+    secretName: franpolignano-wildcard-tls
+EOF
+        echo "ArgoCD ingress created: https://argocd.${DOMAIN}"
+    fi
+
+    echo ""
+    echo "TLS setup complete."
+    echo "  Ingress IP:  $INGRESS_IP"
+    echo "  Wildcard:    *.${DOMAIN}"
+    echo "  Pi-hole DNS: address=/.${DOMAIN}/${INGRESS_IP}"
+    echo ""
+fi
+
+# =============================================================================
 # Output
 # =============================================================================
 MASTER_IP=$(grep 'ansible_host=' ansible/inventory.ini | head -1 | sed 's/.*ansible_host=//')
@@ -319,13 +572,24 @@ MASTER_IP=$(grep 'ansible_host=' ansible/inventory.ini | head -1 | sed 's/.*ansi
 export KUBECONFIG=$(pwd)/kubeconfig
 DEMO_LB_IP=$(kubectl -n demo get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 DEMO2_LB_IP=$(kubectl -n demo2 get svc nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
-ARGOCD_LB_IP=$(kubectl -n argocd get svc argocd-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+ARGOCD_LB_IP=$(kubectl -n argocd get svc argocd-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+INGRESS_IP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
 
 echo ""
 echo "=== Deployment complete ==="
 echo ""
 echo "Cluster: $CLUSTER_NAME ($K8S_DISTRO, $LB_IMPLEMENTATION)"
 echo ""
+KUBECONFIG_LINE="export KUBECONFIG=$(pwd)/kubeconfig"
+if ! grep -qF "$KUBECONFIG_LINE" ~/.bashrc 2>/dev/null; then
+    echo "" >> ~/.bashrc
+    echo "# k8s-fun kubeconfig" >> ~/.bashrc
+    echo "$KUBECONFIG_LINE" >> ~/.bashrc
+    echo "KUBECONFIG added to ~/.bashrc (open a new terminal or run: source ~/.bashrc)"
+else
+    echo "KUBECONFIG already set in ~/.bashrc"
+fi
+
 echo "Access:"
 echo "  export KUBECONFIG=$(pwd)/kubeconfig"
 echo ""
@@ -333,7 +597,12 @@ echo "Services:"
 [ "$APP_DASHBOARD" = "true" ] && echo "  Dashboard:    https://${MASTER_IP}:30443"
 [ "$APP_DEMO" = "true" ] && echo "  Demo App 1:   http://${DEMO_LB_IP}:8081"
 [ "$APP_DEMO" = "true" ] && echo "  Demo App 2:   http://${DEMO2_LB_IP}:8082"
-[ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://${ARGOCD_LB_IP}  (see argocd-credentials.txt)"
+if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ]; then
+    [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://argocd.${DOMAIN}  (see argocd-credentials.txt)"
+    [ -n "$INGRESS_IP" ] && echo "  Ingress IP:   ${INGRESS_IP}  (point *.${DOMAIN} here in Pi-hole)"
+else
+    [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://${ARGOCD_LB_IP}  (see argocd-credentials.txt)"
+fi
 [ "$INSTALL_CEPH" = true ] && echo "  S3 Endpoint:  See s3-credentials.txt"
 echo ""
 echo "Nodes:"
