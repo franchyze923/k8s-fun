@@ -335,6 +335,12 @@ if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ] && [ -n "$CLOUDFLARE_API_TOKE
     kubectl patch svc ingress-nginx-controller -n ingress-nginx \
         --type='json' -p='[{"op":"replace","path":"/spec/externalTrafficPolicy","value":"Cluster"}]'
 
+    # Set default SSL certificate so all ingresses use the wildcard cert
+    # without needing the secret copied into each app namespace manually
+    kubectl patch deployment ingress-nginx-controller -n ingress-nginx \
+        --type='json' \
+        -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--default-ssl-certificate=ingress-nginx/franpolignano-wildcard-tls"}]'
+
     echo "Waiting for ingress controller LoadBalancer IP..."
     for i in $(seq 1 30); do
         INGRESS_IP=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
