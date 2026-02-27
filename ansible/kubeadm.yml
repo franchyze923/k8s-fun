@@ -118,6 +118,11 @@
       args:
         creates: /etc/yum.repos.d/docker-ce.repo
 
+    - name: Install nfs-utils (required for NFS PersistentVolumes)
+      ansible.builtin.dnf:
+        name: nfs-utils
+        state: present
+
     - name: Install containerd
       ansible.builtin.dnf:
         name: containerd.io
