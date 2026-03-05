@@ -245,6 +245,12 @@
       delay: 10
       changed_when: false
 
+    - name: Label worker nodes with worker role
+      ansible.builtin.command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf label node {{ hostvars[item]['ansible_hostname'] }}
+        node-role.kubernetes.io/worker=worker --overwrite
+      loop: "{{ groups['workers'] }}"
+
     - name: Get cluster nodes
       ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o wide
       changed_when: false
