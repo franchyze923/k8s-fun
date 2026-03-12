@@ -368,7 +368,7 @@ if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ] && [ -n "$CLOUDFLARE_API_TOKE
     kubectl patch configmap coredns -n kube-system --type merge -p \
         '{"data":{"Corefile":".:53 {\n    errors\n    health {\n       lameduck 5s\n    }\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n       pods insecure\n       fallthrough in-addr.arpa ip6.arpa\n       ttl 30\n    }\n    prometheus :9153\n    forward . 1.1.1.1 8.8.8.8 {\n       max_concurrent 1000\n    }\n    cache 30 {\n       disable success cluster.local\n       disable denial cluster.local\n    }\n    loop\n    reload\n    loadbalance\n}\n"}}'
     kubectl rollout restart deployment/coredns -n kube-system
-    kubectl rollout status deployment/coredns -n kube-system --timeout=180s
+    kubectl rollout status deployment/coredns -n kube-system --timeout=300s
 
     # --- cert-manager ---
     echo "Installing cert-manager..."
