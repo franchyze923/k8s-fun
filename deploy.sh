@@ -42,6 +42,7 @@ LB_IP_START=$(get_config "lb_ip_start" "192.168.40.200")
 LB_IP_END=$(get_config "lb_ip_end" "192.168.40.220")
 INSTALL_CEPH=$(get_config "ceph_enabled" "false")
 CEPH_DISK_SIZE=$(get_config "ceph_disk_size" "20")
+INSTALL_LONGHORN=$(get_config "longhorn_enabled" "false")
 PROXMOX_HOST=$(get_config "host" "192.168.40.10")
 PROXMOX_USER=$(get_config "user" "root@pam")
 PROXMOX_NODE=$(get_config "node" "pve")
@@ -286,6 +287,12 @@ ansible-playbook $ANSIBLE_EXTRA metrics-server.yml
 if [ "$INSTALL_CEPH" = true ]; then
     echo "Installing Rook-Ceph..."
     ansible-playbook $ANSIBLE_EXTRA rook-ceph.yml
+fi
+
+# Longhorn storage
+if [ "$INSTALL_LONGHORN" = "true" ]; then
+    echo "Installing Longhorn..."
+    ansible-playbook $ANSIBLE_EXTRA longhorn.yml
 fi
 
 # Applications (based on config)

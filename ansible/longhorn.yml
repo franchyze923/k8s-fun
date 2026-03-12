@@ -1,0 +1,102 @@
+---
+# Longhorn - Cloud-Native Distributed Block Storage
+
+- name: Install Longhorn prerequisites on all nodes
+  hosts: all
+  become: true
+  tasks:
+    - name: Install iSCSI initiator and supporting packages
+      ansible.builtin.dnf:
+        name:
+          - iscsi-initiator-utils
+          - cryptsetup
+          - device-mapper
+        state: present
+
+    - name: Enable and start iscsid
+      ansible.builtin.systemd:
+        name: iscsid
+        enabled: true
+        state: started
+
+    - name: Load iscsi_tcp kernel module
+      community.general.modprobe:
+        name: iscsi_tcp
+        state: present
+
+    - name: Persist iscsi_tcp on boot
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/iscsi.conf
+        content: "iscsi_tcp\n"
+        mode: '0644'
+
+- name: Deploy Longhorn
+  hosts: master
+  tasks:
+    - name: Apply Longhorn manifest
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }}
+        apply -f https://raw.githubusercontent.com/longhorn/longhorn/v1.7.2/deploy/longhorn.yaml
+      changed_when: true
+
+    - name: Wait for Longhorn manager to be ready
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n longhorn-system
+        rollout status daemonset/longhorn-manager --timeout=300s
+      changed_when: false
+      retries: 5
+      delay: 30
+      register: result
+      until: result.rc == 0
+
+    - name: Wait for Longhorn CSI plugin to be ready
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n longhorn-system
+        rollout status daemonset/longhorn-csi-plugin --timeout=180s
+      changed_when: false
+      retries: 3
+      delay: 20
+      register: result
+      until: result.rc == 0
+
+    - name: Remove default annotation from existing default StorageClass
+      ansible.builtin.shell: |
+        DEFAULT_SC=$({{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} get sc \
+          -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}')
+        if [ -n "$DEFAULT_SC" ] && [ "$DEFAULT_SC" != "longhorn" ]; then
+          {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} patch storageclass "$DEFAULT_SC" \
+            -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+        fi
+      changed_when: true
+      ignore_errors: true
+
+    - name: Set Longhorn as default StorageClass
+      ansible.builtin.command: >
+        {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} patch storageclass longhorn
+        -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+      changed_when: true
+
+    - name: Get storage classes
+      ansible.builtin.command: "{{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} get sc"
+      changed_when: false
+      register: sc_output
+
+    - name: Display storage classes
+      ansible.builtin.debug:
+        msg: "{{ sc_output.stdout_lines }}"
+
+    - name: Display access instructions
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Longhorn deployed!"
+          - "=========================================="
+          - ""
+          - "Longhorn UI is available at:"
+          - "  kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80"
+          - "  then open http://localhost:8080"
+          - ""
+          - "StorageClass 'longhorn' is now the default."
+          - "Use it in PVCs with storageClassName: longhorn"
+          - ""
+          - "=========================================="
