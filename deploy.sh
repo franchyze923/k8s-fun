@@ -342,6 +342,10 @@ if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ] && [ -n "$CLOUDFLARE_API_TOKE
     kubectl patch svc ingress-nginx-controller -n ingress-nginx \
         --type='json' -p='[{"op":"replace","path":"/spec/externalTrafficPolicy","value":"Cluster"}]'
 
+    # Pin ingress to .203 so it matches DNS records
+    kubectl annotate svc ingress-nginx-controller -n ingress-nginx \
+        lbipam.cilium.io/ips="192.168.40.203" --overwrite
+
     # Set default SSL certificate so all ingresses use the wildcard cert
     # without needing the secret copied into each app namespace manually
     kubectl patch deployment ingress-nginx-controller -n ingress-nginx \
