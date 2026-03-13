@@ -521,7 +521,7 @@ print(json.dumps(s,indent=2))" > "$CERT_BACKUP_FILE"
         kubectl patch configmap argocd-cmd-params-cm -n argocd \
             --type merge -p '{"data":{"server.insecure":"true"}}'
         kubectl rollout restart deployment/argocd-server -n argocd
-        kubectl rollout status deployment/argocd-server -n argocd --timeout=60s
+        kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
 
         # Change argocd-server to ClusterIP (ingress handles external access)
         kubectl patch svc argocd-server -n argocd \
