@@ -373,8 +373,8 @@ if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ] && [ -n "$CLOUDFLARE_API_TOKE
     # --- cert-manager ---
     echo "Installing cert-manager..."
     kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.0/cert-manager.yaml
-    kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
-    kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+    kubectl rollout status deployment/cert-manager -n cert-manager --timeout=300s
+    kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=300s
 
     # Webhook needs extra time after rollout to complete internal TLS setup before
     # the API server can call it (kubeadm + Cilium race condition)

@@ -44,8 +44,8 @@
         {{ kubectl_bin }} --kubeconfig={{ kubeconfig_path }} -n rook-ceph get pods -l app=rook-ceph-rgw --no-headers 2>/dev/null | grep -c "Running" || echo "0"
       register: rgw_count
       until: rgw_count.stdout | int >= 1
-      retries: 30
-      delay: 10
+      retries: 60
+      delay: 15
       changed_when: false
 
     - name: Create S3 user
