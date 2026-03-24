@@ -615,10 +615,12 @@ echo "Services:"
 [ "$APP_DEMO" = "true" ] && echo "  Demo App 1:   http://${DEMO_LB_IP}:8081"
 [ "$APP_DEMO" = "true" ] && echo "  Demo App 2:   http://${DEMO2_LB_IP}:8082"
 if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ]; then
-    [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://argocd.${DOMAIN}  (see argocd-credentials.txt)"
+    [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://argocd.${DOMAIN}"
+    [ "$APP_ARGOCD" = "true" ] && ARGOCD_PW=$(kubectl --kubeconfig=kubeconfig -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && echo "  Argo CD Pass: ${ARGOCD_PW}"
     [ -n "$INGRESS_IP" ] && echo "  Ingress IP:   ${INGRESS_IP}  (point *.${DOMAIN} here in Pi-hole)"
 else
-    [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://${ARGOCD_LB_IP}  (see argocd-credentials.txt)"
+    [ "$APP_ARGOCD" = "true" ] && echo "  Argo CD:      https://${ARGOCD_LB_IP}"
+    [ "$APP_ARGOCD" = "true" ] && ARGOCD_PW=$(kubectl --kubeconfig=kubeconfig -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && echo "  Argo CD Pass: ${ARGOCD_PW}"
 fi
 [ "$INSTALL_CEPH" = true ] && echo "  S3 Endpoint:  See s3-credentials.txt"
 echo ""

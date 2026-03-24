@@ -113,5 +113,5 @@ variable "template_vmid" {
 variable "ceph_disk_size" {
   description = "Size of the Ceph OSD disk in GB"
   type        = number
-  default     = 50
+  default     = 100
 }
