@@ -347,6 +347,20 @@ if [ "$TLS_ENABLED" = "true" ] && [ -n "$DOMAIN" ] && [ -n "$CLOUDFLARE_API_TOKE
     # --- cert-manager ---
     echo "Installing cert-manager..."
     kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.0/cert-manager.yaml
+
+    # Force DNS-01 self-checks to use public recursive resolvers instead of the
+    # default authoritative-nameserver walk. The home network's local DNS can hold
+    # stale NS records for the domain, which makes cert-manager query the wrong
+    # server and report "DNS record not yet propagated" forever — blocking issuance
+    # and renewal even though the TXT record is live everywhere else.
+    if ! kubectl get deploy cert-manager -n cert-manager \
+        -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q 'dns01-recursive-nameservers-only'; then
+        kubectl patch deploy cert-manager -n cert-manager --type=json -p='[
+          {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--dns01-recursive-nameservers-only=true"},
+          {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53"}
+        ]'
+    fi
+
     kubectl rollout status deployment/cert-manager -n cert-manager --timeout=300s
     kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=300s
 
@@ -391,7 +405,26 @@ EOF
     # --- Wildcard certificate (issued into gateway-system namespace) ---
     CERT_BACKUP_FILE="tls-certs/wildcard-tls-secret.json"
 
+    # Only restore the saved cert if it is still valid for at least 7 more days.
+    # Restoring an expired/near-expired cert makes the Gateway serve a "not trusted"
+    # cert until cert-manager finishes renewing — better to force fresh issuance.
+    SAVED_CERT_USABLE=false
     if [ -f "$CERT_BACKUP_FILE" ]; then
+        SAVED_CERT_PEM=$(python3 -c "
+import json,base64,sys
+try:
+    s=json.load(open('$CERT_BACKUP_FILE'))
+    sys.stdout.write(base64.b64decode(s['data']['tls.crt']).decode())
+except Exception:
+    pass" 2>/dev/null)
+        if [ -n "$SAVED_CERT_PEM" ] && echo "$SAVED_CERT_PEM" | openssl x509 -checkend 604800 >/dev/null 2>&1; then
+            SAVED_CERT_USABLE=true
+        else
+            echo "Saved certificate is expired or expiring within 7 days — forcing fresh issuance."
+        fi
+    fi
+
+    if [ "$SAVED_CERT_USABLE" = "true" ]; then
         # Pre-load the saved secret BEFORE creating the Certificate resource.
         # cert-manager checks annotations on the secret to identify the issuer —
         # if the secret already exists with matching annotations when the Certificate
